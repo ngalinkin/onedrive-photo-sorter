@@ -153,6 +153,8 @@
         </div>
     </div>
 
+    <!-- Load MSAL library directly -->
+    <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
     <script>
         // Your Azure App Registration Client ID
         const CLIENT_ID = '18eebe37-a762-4148-b425-4ee4d79674bf';
@@ -165,59 +167,51 @@
         }
 
         function connectToOneDrive() {
-            showStatus('Loading Microsoft authentication...', 'loading');
+            showStatus('Starting login process...', 'loading');
             
-            // Load MSAL library dynamically
-            const script = document.createElement('script');
-            script.src = 'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js';
+            // Check if MSAL is already loaded
+            if (typeof msal === 'undefined') {
+                showStatus('❌ Microsoft authentication library failed to load', 'error');
+                return;
+            }
             
-            script.onload = function() {
-                showStatus('Starting login process...', 'loading');
+            try {
+                const msalConfig = {
+                    auth: {
+                        clientId: CLIENT_ID,
+                        authority: 'https://login.microsoftonline.com/consumers',
+                        redirectUri: window.location.origin
+                    },
+                    cache: {
+                        cacheLocation: 'sessionStorage',
+                        storeAuthStateInCookie: false
+                    }
+                };
+
+                const msalInstance = new msal.PublicClientApplication(msalConfig);
                 
-                try {
-                    const msalConfig = {
-                        auth: {
-                            clientId: CLIENT_ID,
-                            authority: 'https://login.microsoftonline.com/consumers',
-                            redirectUri: window.location.origin
-                        },
-                        cache: {
-                            cacheLocation: 'sessionStorage',
-                            storeAuthStateInCookie: false
-                        }
-                    };
+                const loginRequest = {
+                    scopes: ['Files.ReadWrite.All', 'Files.Read.All']
+                };
 
-                    const msalInstance = new msal.PublicClientApplication(msalConfig);
-                    
-                    const loginRequest = {
-                        scopes: ['Files.ReadWrite.All', 'Files.Read.All']
-                    };
-
-                    msalInstance.loginPopup(loginRequest)
-                        .then(response => {
-                            showStatus('✅ Successfully connected to OneDrive!', 'success');
-                            document.getElementById('connectBtn').style.display = 'none';
-                            document.getElementById('controls').style.display = 'block';
-                            
-                            // Store access token for API calls
-                            window.oneDriveToken = response.accessToken;
-                        })
-                        .catch(error => {
-                            showStatus(`❌ Login failed: ${error.message}`, 'error');
-                            console.error('Login error:', error);
-                        });
+                msalInstance.loginPopup(loginRequest)
+                    .then(response => {
+                        showStatus('✅ Successfully connected to OneDrive!', 'success');
+                        document.getElementById('connectBtn').style.display = 'none';
+                        document.getElementById('controls').style.display = 'block';
                         
-                } catch (error) {
-                    showStatus(`❌ Setup error: ${error.message}`, 'error');
-                    console.error('Setup error:', error);
-                }
-            };
-            
-            script.onerror = function() {
-                showStatus('❌ Failed to load Microsoft authentication library', 'error');
-            };
-            
-            document.head.appendChild(script);
+                        // Store access token for API calls
+                        window.oneDriveToken = response.accessToken;
+                    })
+                    .catch(error => {
+                        showStatus(`❌ Login failed: ${error.message}`, 'error');
+                        console.error('Login error:', error);
+                    });
+                    
+            } catch (error) {
+                showStatus(`❌ Setup error: ${error.message}`, 'error');
+                console.error('Setup error:', error);
+            }
         }
 
         // Add event listener when page loads
