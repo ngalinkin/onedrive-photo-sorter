@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OneDrive Photo Sorter</title>
+    <!-- Microsoft Graph SDK -->
+    <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -343,6 +345,15 @@
             font-weight: bold;
         }
 
+        .error-message {
+            background: #fed7d7;
+            border: 1px solid #f56565;
+            color: #c53030;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
         @media (max-width: 768px) {
             .photo-grid {
                 grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -424,6 +435,8 @@
             Loading photos and videos...
         </div>
 
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+
         <div class="photo-grid" id="itemGrid"></div>
 
         <div class="action-bar" id="actionBar" style="display: none;">
@@ -454,8 +467,28 @@
     </div>
 
     <script>
+        // Get client ID from environment variable
+        const CLIENT_ID = process.env.VITE_CLIENT_ID;
+        
+        const msalConfig = {
+            auth: {
+                clientId: CLIENT_ID,
+                authority: 'https://login.microsoftonline.com/consumers',
+                redirectUri: window.location.origin
+            },
+            cache: {
+                cacheLocation: 'sessionStorage',
+                storeAuthStateInCookie: false
+            }
+        };
+
+        const loginRequest = {
+            scopes: ['Files.ReadWrite.All', 'Files.Read.All']
+        };
+
         class OneDriveMediaSorter {
             constructor() {
+                this.msalInstance = new msal.PublicClientApplication(msalConfig);
                 this.accessToken = null;
                 this.items = [];
                 this.itemsPerPage = 24;
@@ -463,8 +496,22 @@
                 this.selectedItems = new Set();
                 this.currentIndex = 0;
                 this.displayedItems = [];
+                this.allFolders = [];
                 
                 this.initializeEventListeners();
+                this.handleRedirectPromise();
+            }
+
+            async handleRedirectPromise() {
+                try {
+                    const response = await this.msalInstance.handleRedirectPromise();
+                    if (response) {
+                        this.accessToken = response.accessToken;
+                        this.showLoggedInState();
+                    }
+                } catch (error) {
+                    this.showError('Authentication error: ' + error.message);
+                }
             }
 
             initializeEventListeners() {
@@ -489,30 +536,50 @@
             }
 
             async authenticate() {
-                alert('🚀 This is a demo interface!\n\nTo implement this fully, you would need to:\n\n1. Register your app with Microsoft Azure AD\n2. Use Microsoft Graph API for OneDrive access\n3. Implement proper OAuth2 authentication\n4. Handle file operations through the Graph API\n\nFor now, this shows you the interface and functionality structure.');
-                
-                this.accessToken = 'demo_token';
+                try {
+                    if (!CLIENT_ID) {
+                        this.showError('CLIENT_ID environment variable not found. Please configure VITE_CLIENT_ID in your Azure Static Web App settings.');
+                        return;
+                    }
+                    
+                    const response = await this.msalInstance.loginPopup(loginRequest);
+                    this.accessToken = response.accessToken;
+                    this.showLoggedInState();
+                } catch (error) {
+                    this.showError('Login failed: ' + error.message);
+                }
+            }
+
+            showLoggedInState() {
                 document.querySelector('.auth-section').style.display = 'none';
                 document.getElementById('controls').style.display = 'block';
                 this.loadFolders();
             }
 
-            loadFolders() {
-                const folders = [
-                    { name: 'Camera Roll', path: '/Camera Roll' },
-                    { name: 'Screenshots', path: '/Screenshots' },
-                    { name: 'Videos', path: '/Videos' },
-                    { name: '2023 Media', path: '/2023 Media' },
-                    { name: '2024 Media', path: '/2024 Media' }
-                ];
-                
-                const select = document.getElementById('folderSelect');
-                folders.forEach(folder => {
-                    const option = document.createElement('option');
-                    option.value = folder.path;
-                    option.textContent = folder.name;
-                    select.appendChild(option);
-                });
+            async loadFolders() {
+                try {
+                    document.getElementById('loading').style.display = 'block';
+                    
+                    const response = await this.makeGraphRequest('/me/drive/root/children?$filter=folder%20ne%20null');
+                    const folders = response.value || [];
+                    
+                    const select = document.getElementById('folderSelect');
+                    select.innerHTML = '<option value="">Select a folder...</option>';
+                    select.innerHTML += '<option value="root">📁 Root / Photos</option>';
+                    
+                    folders.forEach(folder => {
+                        const option = document.createElement('option');
+                        option.value = folder.id;
+                        option.textContent = `📁 ${folder.name}`;
+                        select.appendChild(option);
+                    });
+                    
+                    this.allFolders = [{ id: 'root', name: 'Root' }, ...folders];
+                    document.getElementById('loading').style.display = 'none';
+                } catch (error) {
+                    this.showError('Failed to load folders: ' + error.message);
+                    document.getElementById('loading').style.display = 'none';
+                }
             }
 
             async loadItems() {
@@ -522,37 +589,86 @@
                     return;
                 }
 
-                document.getElementById('loading').style.display = 'block';
-                document.getElementById('itemGrid').innerHTML = '';
+                try {
+                    document.getElementById('loading').style.display = 'block';
+                    document.getElementById('itemGrid').innerHTML = '';
+                    document.getElementById('errorMessage').style.display = 'none';
 
-                setTimeout(() => {
-                    this.generateDemoItems();
+                    const folderId = folderSelect.value === 'root' ? 'root' : folderSelect.value;
+                    const endpoint = folderId === 'root' 
+                        ? '/me/drive/root/children'
+                        : `/me/drive/items/${folderId}/children`;
+                    
+                    const response = await this.makeGraphRequest(endpoint);
+                    const allItems = response.value || [];
+                    
+                    // Filter for images and videos
+                    this.items = allItems.filter(item => {
+                        if (item.folder) return false; // Skip folders
+                        const name = item.name.toLowerCase();
+                        return name.match(/\.(jpg|jpeg|png|gif|mp4|mov|avi|wmv|webm|m4v)$/);
+                    });
+
+                    // Add thumbnails and metadata
+                    await this.loadItemsMetadata();
+                    
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('stats').style.display = 'flex';
                     document.getElementById('actionBar').style.display = 'block';
+                    
+                    this.selectedItems.clear();
+                    this.currentIndex = 0;
                     this.renderItems();
                     this.updateStats();
-                }, 1500);
+                    
+                } catch (error) {
+                    this.showError('Failed to load items: ' + error.message);
+                    document.getElementById('loading').style.display = 'none';
+                }
             }
 
-            generateDemoItems() {
-                this.items = [];
-                for (let i = 1; i <= 100; i++) {
-                    const isVideo = Math.random() < 0.3; // 30% videos
-                    const extension = isVideo ? (Math.random() < 0.5 ? '.mp4' : '.mov') : '.jpg';
-                    const prefix = isVideo ? 'VID' : 'IMG';
-                    
-                    this.items.push({
-                        id: `item_${i}`,
-                        name: `${prefix}_${String(i).padStart(4, '0')}${extension}`,
-                        type: isVideo ? 'video' : 'image',
-                        size: Math.floor(Math.random() * (isVideo ? 50000000 : 8000000)) + (isVideo ? 5000000 : 500000),
-                        dateCreated: new Date(2024, Math.floor(Math.random() * 12), Math.floor(Math.random() * 28) + 1),
-                        thumbnailUrl: `https://picsum.photos/400/300?random=${i}`,
-                        fullUrl: isVideo ? `https://sample-videos.com/zip/10/mp4/SampleVideo_640x360_1mb.mp4` : `https://picsum.photos/1200/800?random=${i}`,
-                        duration: isVideo ? Math.floor(Math.random() * 300) + 10 : null
-                    });
+            async loadItemsMetadata() {
+                for (let item of this.items) {
+                    try {
+                        // Get thumbnail
+                        const thumbResponse = await this.makeGraphRequest(`/me/drive/items/${item.id}/thumbnails/0/medium`);
+                        item.thumbnailUrl = thumbResponse.url;
+                        
+                        // Determine if video
+                        const isVideo = item.name.toLowerCase().match(/\.(mp4|mov|avi|wmv|webm|m4v)$/);
+                        item.type = isVideo ? 'video' : 'image';
+                        
+                        // Get download URL
+                        item.downloadUrl = item['@microsoft.graph.downloadUrl'] || item.webUrl;
+                        
+                        // Format size and date
+                        item.size = item.size || 0;
+                        item.dateCreated = new Date(item.createdDateTime || item.lastModifiedDateTime);
+                        
+                    } catch (error) {
+                        // Fallback for items without thumbnails
+                        item.thumbnailUrl = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjRjdGQUZDIi8+CjxwYXRoIGQ9Ik0yMCAyOEMyNC40MTgzIDI4IDI4IDI0LjQxODMgMjggMjBDMjggMTUuNTgxNyAyNC40MTgzIDEyIDIwIDEyQzE1LjU4MTcgMTIgMTIgMTUuNTgxNyAxMiAyMEMxMiAyNC40MTgzIDE1LjU4MTcgMjggMjAgMjhaIiBmaWxsPSIjRTJFOEYwIi8+Cjx0ZXh0IHg9IjIwIiB5PSIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjNzE4MDk2Ij4/PC90ZXh0Pgo8L3N2Zz4K';
+                        item.type = 'image';
+                        item.downloadUrl = item.webUrl;
+                        item.size = item.size || 0;
+                        item.dateCreated = new Date(item.createdDateTime || item.lastModifiedDateTime);
+                    }
                 }
+            }
+
+            async makeGraphRequest(endpoint) {
+                const response = await fetch(`https://graph.microsoft.com/v1.0${endpoint}`, {
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Graph API error: ${response.status} ${response.statusText}`);
+                }
+
+                return await response.json();
             }
 
             renderItems() {
@@ -583,7 +699,7 @@
                 }
 
                 const videoOverlay = item.type === 'video' ? 
-                    `<div class="video-overlay">📹 ${this.formatDuration(item.duration)}</div>` : '';
+                    `<div class="video-overlay">📹 ${item.type.toUpperCase()}</div>` : '';
 
                 const currentIndicator = index === this.currentIndex ? 
                     `<div class="current-item-indicator">CURRENT</div>` : '';
@@ -591,7 +707,8 @@
                 card.innerHTML = `
                     ${videoOverlay}
                     ${currentIndicator}
-                    <img class="photo-preview" src="${item.thumbnailUrl}" alt="${item.name}">
+                    <img class="photo-preview" src="${item.thumbnailUrl}" alt="${item.name}" 
+                         onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjRjdGQUZDIi8+CjxwYXRoIGQ9Ik0yMCAyOEMyNC40MTgzIDI4IDI4IDI0LjQxODMgMjggMjBDMjggMTUuNTgxNyAyNC40MTgzIDEyIDIwIDEyQzE1LjU4MTcgMTIgMTIgMTUuNTgxNyAxMiAyMEMxMiAyNC40MTgzIDE1LjU4MTcgMjggMjAgMjhaIiBmaWxsPSIjRTJFOEYwIi8+Cjx0ZXh0IHg9IjIwIiB5PSIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjEyIiBmaWxsPSIjNzE4MDk2Ij4/PC90ZXh0Pgo8L3N2Zz4K';">
                     <div class="photo-info">
                         <div class="photo-name">${item.name}</div>
                         <div class="photo-details">
@@ -604,13 +721,6 @@
                 card.addEventListener('click', () => this.enlargeItem(item));
 
                 return card;
-            }
-
-            formatDuration(seconds) {
-                if (!seconds) return '';
-                const mins = Math.floor(seconds / 60);
-                const secs = seconds % 60;
-                return `${mins}:${secs.toString().padStart(2, '0')}`;
             }
 
             toggleSelection(itemId) {
@@ -658,11 +768,11 @@
                 if (item.type === 'video') {
                     modalImage.style.display = 'none';
                     modalVideo.style.display = 'block';
-                    modalVideo.src = item.fullUrl;
+                    modalVideo.src = item.downloadUrl;
                 } else {
                     modalVideo.style.display = 'none';
                     modalImage.style.display = 'block';
-                    modalImage.src = item.fullUrl;
+                    modalImage.src = item.downloadUrl;
                 }
 
                 modal.style.display = 'block';
@@ -697,101 +807,4 @@
                     case 'ArrowRight':
                         e.preventDefault();
                         this.currentIndex = Math.min(this.currentIndex + 1, this.displayedItems.length - 1);
-                        this.updateFocusIndicator();
-                        this.updateStats();
-                        break;
-                    case 'ArrowLeft':
-                        e.preventDefault();
-                        this.currentIndex = Math.max(this.currentIndex - 1, 0);
-                        this.updateFocusIndicator();
-                        this.updateStats();
-                        break;
-                    case 'ArrowDown':
-                        e.preventDefault();
-                        const itemsPerRow = Math.floor(document.getElementById('itemGrid').offsetWidth / 300);
-                        this.currentIndex = Math.min(this.currentIndex + itemsPerRow, this.displayedItems.length - 1);
-                        this.updateFocusIndicator();
-                        this.updateStats();
-                        break;
-                    case 'ArrowUp':
-                        e.preventDefault();
-                        const itemsPerRowUp = Math.floor(document.getElementById('itemGrid').offsetWidth / 300);
-                        this.currentIndex = Math.max(this.currentIndex - itemsPerRowUp, 0);
-                        this.updateFocusIndicator();
-                        this.updateStats();
-                        break;
-                    case 'Enter':
-                        e.preventDefault();
-                        if (this.displayedItems[this.currentIndex]) {
-                            this.enlargeItem(this.displayedItems[this.currentIndex]);
-                        }
-                        break;
-                }
-            }
-
-            updateStats() {
-                const totalCount = this.items.length;
-                const selectedCount = this.selectedItems.size;
-                const displayedCount = this.displayedItems.length;
-
-                document.getElementById('totalCount').textContent = totalCount;
-                document.getElementById('selectedCount').textContent = selectedCount;
-                document.getElementById('currentIndex').textContent = this.currentIndex + 1;
-                document.getElementById('displayedCount').textContent = displayedCount;
-                document.getElementById('deleteCountBtn').textContent = selectedCount;
-                document.getElementById('keepCountBtn').textContent = selectedCount;
-
-                document.getElementById('deleteSelected').disabled = selectedCount === 0;
-                document.getElementById('keepSelected').disabled = selectedCount === 0;
-            }
-
-            async executeDeleteSelected() {
-                if (this.selectedItems.size === 0) return;
-
-                const confirmed = confirm(`Are you sure you want to delete ${this.selectedItems.size} selected items? This action cannot be undone.`);
-                if (!confirmed) return;
-
-                const deleteList = this.items.filter(item => this.selectedItems.has(item.id));
-                alert(`✅ Demo: Would delete ${deleteList.length} items:\n\n${deleteList.slice(0, 5).map(p => p.name).join('\n')}${deleteList.length > 5 ? '\n...' : ''}`);
-
-                // Remove from local array for demo
-                this.items = this.items.filter(item => !this.selectedItems.has(item.id));
-                this.selectedItems.clear();
-                this.currentIndex = 0;
-                this.renderItems();
-                this.updateStats();
-            }
-
-            async executeKeepSelected() {
-                if (this.selectedItems.size === 0) return;
-
-                const keepList = Array.from(this.selectedItems);
-                const deleteList = this.items.filter(item => !this.selectedItems.has(item.id));
-
-                const confirmed = confirm(`Keep ${keepList.length} selected items and delete ${deleteList.length} others? This action cannot be undone.`);
-                if (!confirmed) return;
-
-                alert(`✅ Demo: Would keep ${keepList.length} items and delete ${deleteList.length} others`);
-
-                // Keep only selected items for demo
-                this.items = this.items.filter(item => this.selectedItems.has(item.id));
-                this.selectedItems.clear();
-                this.currentIndex = 0;
-                this.renderItems();
-                this.updateStats();
-            }
-
-            clearAllSelections() {
-                this.selectedItems.clear();
-                document.querySelectorAll('.photo-card').forEach(card => {
-                    card.classList.remove('selected');
-                });
-                this.updateStats();
-            }
-        }
-
-        // Initialize the app
-        const mediaSorter = new OneDriveMediaSorter();
-    </script>
-</body>
-</html>
+                        this
