@@ -98,6 +98,62 @@
             display: none;
         }
 
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            color: #4a5568;
+        }
+
+        .breadcrumb-item {
+            cursor: pointer;
+            color: #4285f4;
+            text-decoration: underline;
+        }
+
+        .breadcrumb-item:hover {
+            color: #3367d6;
+        }
+
+        .breadcrumb-separator {
+            color: #cbd5e0;
+        }
+
+        .folder-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .folder-card {
+            background: #f8fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .folder-card:hover {
+            border-color: #4285f4;
+            background: #f0f9ff;
+        }
+
+        .folder-icon {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .folder-name {
+            font-size: 14px;
+            font-weight: 500;
+            color: #2d3748;
+        }
+
         .control-row {
             display: flex;
             gap: 20px;
@@ -185,14 +241,14 @@
         </div>
 
         <div id="controls" class="controls">
+            <div id="breadcrumb" class="breadcrumb" style="display: none;"></div>
+            
+            <div id="folderGrid" class="folder-grid" style="display: none;"></div>
+            
             <div class="control-row">
                 <div class="control-group">
-                    <label for="folderSelect">Folder:</label>
-                    <select id="folderSelect">
-                        <option value="">Select a folder...</option>
-                    </select>
-                    
-                    <button id="loadItems" class="auth-btn">Load Items</button>
+                    <button id="loadItems" class="auth-btn" style="display: none;">Load Photos & Videos</button>
+                    <span id="itemCount" style="font-size: 14px; color: #718096;"></span>
                 </div>
             </div>
         </div>
@@ -208,6 +264,8 @@
         // Your Azure App Registration Client ID
         const CLIENT_ID = '18eebe37-a762-4148-b425-4ee4d79674bf';
         let accessToken = null;
+        let currentPath = [{ name: 'OneDrive', id: 'root' }];
+        let currentFolderId = 'root';
         
         function showStatus(message, type = 'loading') {
             const status = document.getElementById('status');
@@ -250,8 +308,8 @@
                         document.getElementById('connectBtn').style.display = 'none';
                         document.getElementById('controls').style.display = 'block';
                         
-                        // Load folders
-                        loadFolders();
+                        // Load initial folder view
+                        loadCurrentFolder();
                     })
                     .catch(error => {
                         showStatus(`❌ Login failed: ${error.message}`, 'error');
@@ -264,11 +322,15 @@
             }
         }
 
-        async function loadFolders() {
+        async function loadCurrentFolder() {
             try {
-                showStatus('Loading your OneDrive folders...', 'loading');
+                showStatus('Loading folder contents...', 'loading');
                 
-                const response = await fetch('https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=folder ne null', {
+                const endpoint = currentFolderId === 'root' 
+                    ? 'https://graph.microsoft.com/v1.0/me/drive/root/children'
+                    : `https://graph.microsoft.com/v1.0/me/drive/items/${currentFolderId}/children`;
+                
+                const response = await fetch(endpoint, {
                     headers: {
                         'Authorization': `Bearer ${accessToken}`,
                         'Content-Type': 'application/json'
@@ -276,46 +338,115 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(`Failed to load folders: ${response.status}`);
+                    throw new Error(`Failed to load folder: ${response.status}`);
                 }
 
                 const data = await response.json();
-                const folders = data.value || [];
+                const items = data.value || [];
                 
-                const select = document.getElementById('folderSelect');
-                select.innerHTML = '<option value="">Select a folder...</option>';
-                select.innerHTML += '<option value="root">📁 Root / Photos</option>';
-                
-                folders.forEach(folder => {
-                    const option = document.createElement('option');
-                    option.value = folder.id;
-                    option.textContent = `📁 ${folder.name}`;
-                    select.appendChild(option);
+                // Separate folders and media files
+                const folders = items.filter(item => item.folder);
+                const mediaItems = items.filter(item => {
+                    if (item.folder) return false;
+                    const name = item.name.toLowerCase();
+                    return name.match(/\.(jpg|jpeg|png|gif|bmp|webp|heic|heif|mp4|mov|avi|wmv|webm|m4v)$/);
                 });
+
+                // Update breadcrumb
+                updateBreadcrumb();
                 
-                showStatus('✅ Ready! Select a folder to start sorting.', 'success');
+                // Show folders
+                displayFolders(folders);
+                
+                // Show media count and load button
+                const itemCount = document.getElementById('itemCount');
+                if (mediaItems.length > 0) {
+                    itemCount.textContent = `${mediaItems.length} photos/videos in this folder`;
+                    document.getElementById('loadItems').style.display = 'inline-block';
+                } else {
+                    itemCount.textContent = 'No photos/videos in this folder';
+                    document.getElementById('loadItems').style.display = 'none';
+                }
+                
+                showStatus(`✅ Found ${folders.length} folders and ${mediaItems.length} media files`, 'success');
                 
             } catch (error) {
-                showStatus('❌ Failed to load folders: ' + error.message, 'error');
+                showStatus('❌ Failed to load folder: ' + error.message, 'error');
                 console.error('Folder loading error:', error);
             }
         }
 
-        async function loadItems() {
-            const folderSelect = document.getElementById('folderSelect');
-            if (!folderSelect.value) {
-                alert('Please select a folder first');
-                return;
-            }
+        function updateBreadcrumb() {
+            const breadcrumb = document.getElementById('breadcrumb');
+            breadcrumb.innerHTML = '';
+            breadcrumb.style.display = 'flex';
+            
+            currentPath.forEach((pathItem, index) => {
+                const item = document.createElement('span');
+                item.className = 'breadcrumb-item';
+                item.textContent = pathItem.name;
+                item.onclick = () => navigateToFolder(pathItem.id, index);
+                breadcrumb.appendChild(item);
+                
+                if (index < currentPath.length - 1) {
+                    const separator = document.createElement('span');
+                    separator.className = 'breadcrumb-separator';
+                    separator.textContent = ' > ';
+                    breadcrumb.appendChild(separator);
+                }
+            });
+        }
 
+        function displayFolders(folders) {
+            const folderGrid = document.getElementById('folderGrid');
+            folderGrid.innerHTML = '';
+            
+            if (folders.length > 0) {
+                folderGrid.style.display = 'grid';
+                
+                folders.forEach(folder => {
+                    const card = document.createElement('div');
+                    card.className = 'folder-card';
+                    card.onclick = () => enterFolder(folder);
+                    
+                    card.innerHTML = `
+                        <div class="folder-icon">📁</div>
+                        <div class="folder-name">${folder.name}</div>
+                    `;
+                    
+                    folderGrid.appendChild(card);
+                });
+            } else {
+                folderGrid.style.display = 'none';
+            }
+        }
+
+        function enterFolder(folder) {
+            currentFolderId = folder.id;
+            currentPath.push({ name: folder.name, id: folder.id });
+            loadCurrentFolder();
+            
+            // Clear any loaded photos
+            document.getElementById('itemGrid').innerHTML = '';
+        }
+
+        function navigateToFolder(folderId, pathIndex) {
+            currentFolderId = folderId;
+            currentPath = currentPath.slice(0, pathIndex + 1);
+            loadCurrentFolder();
+            
+            // Clear any loaded photos
+            document.getElementById('itemGrid').innerHTML = '';
+        }
+
+        async function loadItems() {
             try {
                 document.getElementById('loading').style.display = 'block';
                 document.getElementById('itemGrid').innerHTML = '';
 
-                const folderId = folderSelect.value === 'root' ? 'root' : folderSelect.value;
-                const endpoint = folderId === 'root' 
+                const endpoint = currentFolderId === 'root' 
                     ? 'https://graph.microsoft.com/v1.0/me/drive/root/children'
-                    : `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children`;
+                    : `https://graph.microsoft.com/v1.0/me/drive/items/${currentFolderId}/children`;
                 
                 const response = await fetch(endpoint, {
                     headers: {
@@ -335,7 +466,7 @@
                 const mediaItems = allItems.filter(item => {
                     if (item.folder) return false;
                     const name = item.name.toLowerCase();
-                    return name.match(/\.(jpg|jpeg|png|gif|bmp|webp|mp4|mov|avi|wmv|webm|m4v)$/);
+                    return name.match(/\.(jpg|jpeg|png|gif|bmp|webp|heic|heif|mp4|mov|avi|wmv|webm|m4v)$/);
                 });
 
                 // Display first 24 items
@@ -375,7 +506,7 @@
                 }
                 
                 document.getElementById('loading').style.display = 'none';
-                showStatus(`✅ Loaded ${itemsToShow.length} items from ${mediaItems.length} total`, 'success');
+                showStatus(`✅ Loaded ${itemsToShow.length} items from ${mediaItems.length} total in current folder`, 'success');
                 
             } catch (error) {
                 showStatus('❌ Failed to load items: ' + error.message, 'error');
