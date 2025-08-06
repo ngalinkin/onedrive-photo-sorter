@@ -466,9 +466,20 @@
         </div>
     </div>
 
+    <!-- Load external config if available -->
+    <script src="config.js" onerror="console.log('Config file not found - will prompt for client ID')"></script>
     <script>
-        // Get client ID from environment variable
-        const CLIENT_ID = process.env.VITE_CLIENT_ID;
+        // Configuration - Client ID will be loaded from external config
+        let CLIENT_ID = null;
+        
+        // Try to load from external config file (not in git)
+        try {
+            if (window.APP_CONFIG && window.APP_CONFIG.clientId) {
+                CLIENT_ID = window.APP_CONFIG.clientId;
+            }
+        } catch (e) {
+            // Config file not found, will prompt user
+        }
         
         const msalConfig = {
             auth: {
@@ -538,8 +549,14 @@
             async authenticate() {
                 try {
                     if (!CLIENT_ID) {
-                        this.showError('CLIENT_ID environment variable not found. Please configure VITE_CLIENT_ID in your Azure Static Web App settings.');
-                        return;
+                        // Prompt for client ID if not in config file
+                        CLIENT_ID = prompt('Enter your Azure App Registration Client ID:');
+                        if (!CLIENT_ID) {
+                            this.showError('Client ID is required to connect to OneDrive');
+                            return;
+                        }
+                        // Store it for this session
+                        sessionStorage.setItem('onedrive_client_id', CLIENT_ID);
                     }
                     
                     const response = await this.msalInstance.loginPopup(loginRequest);
