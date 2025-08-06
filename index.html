@@ -342,13 +342,13 @@
             background: #c53030;
         }
 
-        .btn-skip-all {
-            background: #4285f4;
+        .btn-keep-all {
+            background: #38a169;
             color: white;
         }
 
-        .btn-skip-all:hover {
-            background: #3367d6;
+        .btn-keep-all:hover {
+            background: #2f855a;
         }
 
         .clear-btn {
@@ -488,11 +488,8 @@
         <div class="photo-grid" id="itemGrid"></div>
 
         <div class="action-bar" id="actionBar" style="display: none;">
-            <button id="deleteSelected" class="action-btn btn-delete-selected">
-                🗑️ Delete Selected (<span id="deleteCountBtn">0</span>)
-            </button>
-            <button id="skipAll" class="action-btn btn-skip-all">
-                ⏭️ Keep All & Continue
+            <button id="actionButton" class="action-btn btn-keep-all">
+                ✅ Keep All & Continue
             </button>
         </div>
 
@@ -925,9 +922,9 @@
             }
         }
 
-        async function executeDeleteSelected() {
-            // Allow deleting 0 photos (just mark all as processed)
+        async function executeAction() {
             if (selectedItems.size === 0) {
+                // Keep all photos and continue
                 const confirmed = confirm(`Keep all ${loadedItems.length} photos and continue to next batch?`);
                 if (!confirmed) return;
                 
@@ -941,11 +938,12 @@
                 return;
             }
 
-            const confirmed = confirm(`Are you sure you want to delete ${selectedItems.size} selected items? This action cannot be undone.`);
+            // Delete selected photos
+            const confirmed = confirm(`Are you sure you want to delete ${selectedItems.size} selected photo${selectedItems.size > 1 ? 's' : ''}? This action cannot be undone.`);
             if (!confirmed) return;
 
             try {
-                showStatus('Deleting selected items...', 'loading');
+                showStatus(`Deleting ${selectedItems.size} photos...`, 'loading');
                 
                 // Mark selected items as processed AND delete them
                 for (let itemId of selectedItems) {
@@ -966,25 +964,12 @@
                     }
                 }
 
-                showStatus('✅ Items deleted successfully!', 'success');
+                showStatus(`✅ ${selectedItems.size} photo${selectedItems.size > 1 ? 's' : ''} deleted successfully!`, 'success');
                 loadItems(); // Reload to show next batch
                 
             } catch (error) {
                 showStatus('❌ Delete failed: ' + error.message, 'error');
             }
-        }
-
-        async function executeSkipAll() {
-            const confirmed = confirm(`Keep all ${loadedItems.length} photos and continue to next batch?`);
-            if (!confirmed) return;
-
-            // Mark all items as processed (keep)
-            for (let item of loadedItems) {
-                processedItems.add(item.id);
-            }
-
-            showStatus('✅ All photos kept!', 'success');
-            loadItems(); // Load next batch
         }
 
         function handleKeyboard(e) {
@@ -1043,16 +1028,20 @@
 
         // Event listeners
         document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('connectBtn').addEventListener('click', connectToOneDrive);
-            document.getElementById('loadItems').addEventListener('click', loadItems);
-            document.getElementById('deleteSelected').addEventListener('click', executeDeleteSelected);
-            document.getElementById('keepSelected').addEventListener('click', executeKeepSelected);
-            document.getElementById('clearSelections').addEventListener('click', clearAllSelections);
-            
-            // Modal events
+            const connectBtn = document.getElementById('connectBtn');
+            const loadItemsBtn = document.getElementById('loadItems');
+            const actionButton = document.getElementById('actionButton');
+            const clearBtn = document.getElementById('clearSelections');
             const modalClose = document.querySelector('.modal-close');
             const modal = document.getElementById('enlargeModal');
             
+            // Add event listeners only if elements exist
+            if (connectBtn) connectBtn.addEventListener('click', connectToOneDrive);
+            if (loadItemsBtn) loadItemsBtn.addEventListener('click', loadItems);
+            if (actionButton) actionButton.addEventListener('click', executeAction);
+            if (clearBtn) clearBtn.addEventListener('click', clearAllSelections);
+            
+            // Modal events
             if (modalClose) modalClose.addEventListener('click', closeModal);
             if (modal) {
                 modal.addEventListener('click', (e) => {
