@@ -386,7 +386,8 @@
         </div>
 
         <div class="auth-section">
-            <button id="authBtn" class="auth-btn">Connect to OneDrive</button>
+            <button id="authBtn" class="auth-btn" onclick="testClick()">Connect to OneDrive</button>
+            <p id="debugInfo" style="margin-top: 10px; font-size: 12px; color: #666;"></p>
         </div>
 
         <div class="controls" style="display: none;" id="controls">
@@ -469,6 +470,24 @@
     <!-- Load external config if available -->
     <script src="config.js" onerror="console.log('Config file not found - will prompt for client ID')"></script>
     <script>
+        // Test function to see if JavaScript is working
+        function testClick() {
+            document.getElementById('debugInfo').textContent = 'Button clicked! JavaScript is working...';
+            console.log('Button clicked successfully');
+            
+            // Try to initialize the app
+            try {
+                if (typeof mediaSorter === 'undefined') {
+                    document.getElementById('debugInfo').textContent = 'Creating app instance...';
+                    window.mediaSorter = new OneDriveMediaSorter();
+                }
+                mediaSorter.authenticate();
+            } catch (error) {
+                document.getElementById('debugInfo').textContent = 'Error: ' + error.message;
+                console.error('Error:', error);
+            }
+        }
+
         // Configuration - Client ID will be loaded from external config
         let CLIENT_ID = null;
         
@@ -526,7 +545,8 @@
             }
 
             initializeEventListeners() {
-                document.getElementById('authBtn').addEventListener('click', () => this.authenticate());
+                // Remove the automatic event listener since we're using onclick
+                // document.getElementById('authBtn').addEventListener('click', () => this.authenticate());
                 document.getElementById('loadItems').addEventListener('click', () => this.loadItems());
                 document.getElementById('itemsPerPage').addEventListener('change', (e) => {
                     this.itemsPerPage = parseInt(e.target.value);
