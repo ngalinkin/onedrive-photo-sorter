@@ -385,6 +385,57 @@
             color: #4a5568;
         }
 
+        /* Modal for enlarged view */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+        }
+
+        .modal-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            max-width: 90vw;
+            max-height: 90vh;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .modal-media {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            color: white;
+            font-size: 40px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 1001;
+        }
+
+        .modal-info {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 15px;
+            font-size: 14px;
+        }
+
         .loading {
             text-align: center;
             padding: 50px;
@@ -452,6 +503,19 @@
 
         <div class="keyboard-help">
             <strong>SPACE</strong> - Select/Deselect • <strong>←→</strong> - Navigate • <strong>ENTER</strong> - Enlarge • <strong>ESC</strong> - Close
+        </div>
+    </div>
+
+    <!-- Modal for enlarged view -->
+    <div id="enlargeModal" class="modal">
+        <span class="modal-close">&times;</span>
+        <div class="modal-content">
+            <img id="modalImage" class="modal-media" style="display: none;">
+            <video id="modalVideo" class="modal-media" controls style="display: none;"></video>
+            <div class="modal-info">
+                <div id="modalItemName"></div>
+                <div id="modalItemDetails"></div>
+            </div>
         </div>
     </div>
 
@@ -545,7 +609,7 @@
                 
                 // Separate folders and media files
                 const folders = items.filter(item => item.folder);
-                const mediaItems = items.filter(item => {
+                const allMediaItems = items.filter(item => {
                     if (item.folder) return false;
                     const name = item.name.toLowerCase();
                     return name.match(/\.(jpg|jpeg|png|gif|bmp|webp|heic|heif|mp4|mov|avi|wmv|webm|m4v)$/);
@@ -559,7 +623,7 @@
                 
                 // Show media count and load button (use unprocessed count)
                 const itemCount = document.getElementById('itemCount');
-                const unprocessedMedia = mediaItems.filter(item => !processedItems.has(item.id));
+                const unprocessedMedia = allMediaItems.filter(item => !processedItems.has(item.id));
                 
                 if (unprocessedMedia.length > 0) {
                     itemCount.textContent = `${unprocessedMedia.length} unprocessed photos/videos in this folder`;
@@ -569,7 +633,7 @@
                     document.getElementById('loadItems').style.display = 'none';
                 }
                 
-                showStatus(`✅ Found ${folders.length} folders and ${allMediaItems.length} media files (${unprocessedItems.length} unprocessed)`, 'success');
+                showStatus(`✅ Found ${folders.length} folders and ${allMediaItems.length} media files (${unprocessedMedia.length} unprocessed)`, 'success');
                 
             } catch (error) {
                 showStatus('❌ Failed to load folder: ' + error.message, 'error');
@@ -826,6 +890,36 @@
             updateStats();
         }
 
+        function enlargeItem(item) {
+            const modal = document.getElementById('enlargeModal');
+            const modalImage = document.getElementById('modalImage');
+            const modalVideo = document.getElementById('modalVideo');
+            const modalName = document.getElementById('modalItemName');
+            const modalDetails = document.getElementById('modalItemDetails');
+
+            modalName.textContent = item.name;
+            modalDetails.textContent = `${new Date(item.createdDateTime).toLocaleDateString()} • ${((item.size || 0) / 1024 / 1024).toFixed(1)} MB`;
+
+            if (item.type === 'video') {
+                modalImage.style.display = 'none';
+                modalVideo.style.display = 'block';
+                modalVideo.src = item.downloadUrl;
+            } else {
+                modalVideo.style.display = 'none';
+                modalImage.style.display = 'block';
+                modalImage.src = item.downloadUrl;
+            }
+
+            modal.style.display = 'block';
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('enlargeModal');
+            const modalVideo = document.getElementById('modalVideo');
+            modal.style.display = 'none';
+            modalVideo.pause();
+        }
+
         async function executeDeleteSelected() {
             if (selectedItems.size === 0) return;
 
@@ -900,11 +994,26 @@
         function handleKeyboard(e) {
             if (!loadedItems.length) return;
 
+            // Don't handle keyboard shortcuts when modal is open
+            if (document.getElementById('enlargeModal').style.display === 'block') {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeModal();
+                }
+                return;
+            }
+
             switch(e.key) {
                 case ' ':
                     e.preventDefault();
                     if (loadedItems[currentIndex]) {
                         toggleSelection(loadedItems[currentIndex].id);
+                    }
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    if (loadedItems[currentIndex]) {
+                        enlargeItem(loadedItems[currentIndex]);
                     }
                     break;
                 case 'ArrowRight':
@@ -943,6 +1052,17 @@
             document.getElementById('deleteSelected').addEventListener('click', executeDeleteSelected);
             document.getElementById('keepSelected').addEventListener('click', executeKeepSelected);
             document.getElementById('clearSelections').addEventListener('click', clearAllSelections);
+            
+            // Modal events
+            const modalClose = document.querySelector('.modal-close');
+            const modal = document.getElementById('enlargeModal');
+            
+            if (modalClose) modalClose.addEventListener('click', closeModal);
+            if (modal) {
+                modal.addEventListener('click', (e) => {
+                    if (e.target === e.currentTarget) closeModal();
+                });
+            }
             
             // Keyboard shortcuts
             document.addEventListener('keydown', handleKeyboard);
