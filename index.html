@@ -548,6 +548,8 @@
 
             async authenticate() {
                 try {
+                    console.log('Authentication started...');
+                    
                     if (!CLIENT_ID) {
                         // Prompt for client ID if not in config file
                         CLIENT_ID = prompt('Enter your Azure App Registration Client ID:');
@@ -557,12 +559,17 @@
                         }
                         // Store it for this session
                         sessionStorage.setItem('onedrive_client_id', CLIENT_ID);
+                        console.log('Client ID obtained');
                     }
                     
+                    console.log('Attempting login popup...');
                     const response = await this.msalInstance.loginPopup(loginRequest);
+                    console.log('Login successful:', response);
+                    
                     this.accessToken = response.accessToken;
                     this.showLoggedInState();
                 } catch (error) {
+                    console.error('Login error:', error);
                     this.showError('Login failed: ' + error.message);
                 }
             }
