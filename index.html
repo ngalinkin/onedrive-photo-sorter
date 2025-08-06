@@ -342,18 +342,13 @@
             background: #c53030;
         }
 
-        .btn-keep-selected {
-            background: #38a169;
+        .btn-skip-all {
+            background: #4285f4;
             color: white;
         }
 
-        .btn-keep-selected:hover {
-            background: #2f855a;
-        }
-
-        .action-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+        .btn-skip-all:hover {
+            background: #3367d6;
         }
 
         .clear-btn {
@@ -494,10 +489,10 @@
 
         <div class="action-bar" id="actionBar" style="display: none;">
             <button id="deleteSelected" class="action-btn btn-delete-selected">
-                🗑️ Delete Selected Items (<span id="deleteCountBtn">0</span>)
+                🗑️ Delete Selected (<span id="deleteCountBtn">0</span>)
             </button>
-            <button id="keepSelected" class="action-btn btn-keep-selected">
-                ✅ Keep Selected & Delete Others (<span id="keepCountBtn">0</span>)
+            <button id="skipAll" class="action-btn btn-skip-all">
+                ⏭️ Keep All & Continue
             </button>
         </div>
 
@@ -521,7 +516,7 @@
 
     <script>
         // Your Azure App Registration Client ID
-        const CLIENT_ID = '18eebe37-a762-4148-b425-4ee4d79674bf';
+        const CLIENT_ID = '18eebe37-a762-4148-b425-4ee4d79674ba';
         let accessToken = null;
         let currentPath = [{ name: 'OneDrive', id: 'root' }];
         let currentFolderId = 'root';
@@ -876,10 +871,8 @@
             document.getElementById('currentIndex').textContent = currentIndex + 1;
             document.getElementById('displayedCount').textContent = totalCount;
             document.getElementById('deleteCountBtn').textContent = selectedCount;
-            document.getElementById('keepCountBtn').textContent = selectedCount;
 
-            document.getElementById('deleteSelected').disabled = selectedCount === 0;
-            document.getElementById('keepSelected').disabled = selectedCount === 0;
+            // No need to disable buttons anymore - always allow actions
         }
 
         function clearAllSelections() {
@@ -920,8 +913,33 @@
             modalVideo.pause();
         }
 
+        function handlePhotoClick(index) {
+            console.log('Photo clicked, index:', index);
+            // Make this photo the current focused photo
+            currentIndex = index;
+            updateFocusIndicator();
+            updateStats();
+            // Then enlarge it
+            if (loadedItems[index]) {
+                enlargeItem(loadedItems[index]);
+            }
+        }
+
         async function executeDeleteSelected() {
-            if (selectedItems.size === 0) return;
+            // Allow deleting 0 photos (just mark all as processed)
+            if (selectedItems.size === 0) {
+                const confirmed = confirm(`Keep all ${loadedItems.length} photos and continue to next batch?`);
+                if (!confirmed) return;
+                
+                // Mark all items as processed (keep)
+                for (let item of loadedItems) {
+                    processedItems.add(item.id);
+                }
+                
+                showStatus('✅ All photos kept!', 'success');
+                loadItems(); // Load next batch
+                return;
+            }
 
             const confirmed = confirm(`Are you sure you want to delete ${selectedItems.size} selected items? This action cannot be undone.`);
             if (!confirmed) return;
@@ -956,39 +974,17 @@
             }
         }
 
-        async function executeKeepSelected() {
-            if (selectedItems.size === 0) return;
-
-            const deleteList = loadedItems.filter(item => !selectedItems.has(item.id));
-            const confirmed = confirm(`Keep ${selectedItems.size} selected items and delete ${deleteList.length} others? This action cannot be undone.`);
+        async function executeSkipAll() {
+            const confirmed = confirm(`Keep all ${loadedItems.length} photos and continue to next batch?`);
             if (!confirmed) return;
 
-            try {
-                showStatus('Deleting unselected items...', 'loading');
-                
-                // Delete unselected items and mark them as processed
-                for (let item of deleteList) {
-                    processedItems.add(item.id);
-                    const response = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${item.id}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${accessToken}` }
-                    });
-                    if (!response.ok) {
-                        throw new Error(`Failed to delete item: ${response.status}`);
-                    }
-                }
-
-                // Mark selected (kept) items as processed
-                for (let itemId of selectedItems) {
-                    processedItems.add(itemId);
-                }
-
-                showStatus('✅ Keep operation completed!', 'success');
-                loadItems(); // Reload to show next batch
-                
-            } catch (error) {
-                showStatus('❌ Keep operation failed: ' + error.message, 'error');
+            // Mark all items as processed (keep)
+            for (let item of loadedItems) {
+                processedItems.add(item.id);
             }
+
+            showStatus('✅ All photos kept!', 'success');
+            loadItems(); // Load next batch
         }
 
         function handleKeyboard(e) {
