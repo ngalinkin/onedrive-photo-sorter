@@ -488,17 +488,8 @@
             }
         }
 
-        // Configuration - Client ID will be loaded from external config
-        let CLIENT_ID = null;
-        
-        // Try to load from external config file (not in git)
-        try {
-            if (window.APP_CONFIG && window.APP_CONFIG.clientId) {
-                CLIENT_ID = window.APP_CONFIG.clientId;
-            }
-        } catch (e) {
-            // Config file not found, will prompt user
-        }
+        // Configuration - Your Azure App Registration Client ID
+        const CLIENT_ID = '18eebe37-a762-4148-b425-4ee4d79674bf';
         
         const msalConfig = {
             auth: {
