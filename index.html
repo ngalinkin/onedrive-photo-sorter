@@ -476,7 +476,7 @@
         </div>
 
         <div class="auth-section">
-            <button id="connectBtn" class="auth-btn">Connect to OneDrive</button>
+            <button id="connectBtn" class="auth-btn" onclick="testButtonClick()">Connect to OneDrive</button>
             <div id="status" class="status" style="display: none;"></div>
         </div>
 
@@ -570,6 +570,13 @@
         let showMarkedOnly = false; // Toggle for showing only marked items
         let markingsFileId = null; // ID of the markings file in OneDrive
         
+        // Test function to verify button works
+        function testButtonClick() {
+            console.log('Button clicked!');
+            showStatus('Button works! Starting connection...', 'loading');
+            connectToOneDrive();
+        }
+
         function showStatus(message, type = 'loading') {
             const status = document.getElementById('status');
             status.textContent = message;
@@ -1227,7 +1234,10 @@
 
         // Event listeners
         document.addEventListener('DOMContentLoaded', function() {
-            const connectBtn = document.getElementById('connectBtn');
+            // Remove the automatic event listener since we're using onclick
+            // const connectBtn = document.getElementById('connectBtn');
+            // if (connectBtn) connectBtn.addEventListener('click', connectToOneDrive);
+            
             const loadItemsBtn = document.getElementById('loadItems');
             const deleteRejectedBtn = document.getElementById('deleteRejected');
             const downloadChosenBtn = document.getElementById('downloadChosen');
@@ -1237,7 +1247,6 @@
             const modal = document.getElementById('enlargeModal');
             
             // Add event listeners only if elements exist
-            if (connectBtn) connectBtn.addEventListener('click', connectToOneDrive);
             if (loadItemsBtn) loadItemsBtn.addEventListener('click', loadItems);
             if (deleteRejectedBtn) deleteRejectedBtn.addEventListener('click', deleteRejectedPhotos);
             if (downloadChosenBtn) downloadChosenBtn.addEventListener('click', downloadChosenPhotos);
