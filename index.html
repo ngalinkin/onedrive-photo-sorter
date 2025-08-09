@@ -611,6 +611,9 @@
                         document.getElementById('connectBtn').style.display = 'none';
                         document.getElementById('controls').style.display = 'block';
                         
+                        // Load saved markings from OneDrive
+                        await loadMarkingsFromOneDrive();
+                        
                         // Load initial folder view
                         loadCurrentFolder();
                     })
@@ -625,7 +628,102 @@
             }
         }
 
-        async function loadCurrentFolder() {
+        async function loadMarkingsFromOneDrive() {
+            try {
+                showStatus('Loading saved markings...', 'loading');
+                
+                // Look for existing markings file
+                const response = await fetch('https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=name eq \'photo-markings.json\'', {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.value && data.value.length > 0) {
+                        markingsFileId = data.value[0].id;
+                        
+                        // Download the markings file content
+                        const contentResponse = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${markingsFileId}/content`, {
+                            headers: { 'Authorization': `Bearer ${accessToken}` }
+                        });
+
+                        if (contentResponse.ok) {
+                            const markingsText = await contentResponse.text();
+                            const markingsData = JSON.parse(markingsText);
+                            
+                            // Restore markings
+                            rejectedItems = new Set(markingsData.rejected || []);
+                            chosenItems = new Set(markingsData.chosen || []);
+                            
+                            showStatus('✅ Markings loaded successfully!', 'success');
+                            return;
+                        }
+                    }
+                }
+                
+                // If no file found, that's okay - start fresh
+                showStatus('✅ Starting with fresh markings!', 'success');
+                
+            } catch (error) {
+                console.error('Failed to load markings:', error);
+                showStatus('⚠️ Could not load saved markings, starting fresh', 'loading');
+            }
+        }
+
+        async function saveMarkingsToOneDrive() {
+            try {
+                const markingsData = {
+                    rejected: Array.from(rejectedItems),
+                    chosen: Array.from(chosenItems),
+                    lastUpdated: new Date().toISOString()
+                };
+
+                const content = JSON.stringify(markingsData, null, 2);
+                const blob = new Blob([content], { type: 'application/json' });
+
+                if (markingsFileId) {
+                    // Update existing file
+                    const response = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${markingsFileId}/content`, {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: blob
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Failed to update markings: ${response.status}`);
+                    }
+                } else {
+                    // Create new file
+                    const response = await fetch('https://graph.microsoft.com/v1.0/me/drive/root:/photo-markings.json:/content', {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: blob
+                    });
+
+                    if (response.ok) {
+                        const fileData = await response.json();
+                        markingsFileId = fileData.id;
+                    } else {
+                        throw new Error(`Failed to create markings file: ${response.status}`);
+                    }
+                }
+                
+                console.log('Markings saved to OneDrive');
+                
+            } catch (error) {
+                console.error('Failed to save markings:', error);
+                // Don't show error to user - markings still work in session
+            }
+        }
             try {
                 showStatus('Loading folder contents...', 'loading');
                 
@@ -748,7 +846,7 @@
             document.getElementById('clearSelections').style.display = 'none';
             loadedItems = [];
             currentIndex = 0;
-            // Keep review decisions intact
+            // Keep markings intact
         }
 
         async function loadItems() {
@@ -817,7 +915,7 @@
                 updateFocusIndicator();
                 updateStats();
                 
-                showStatus(`✅ Loaded ${loadedItems.length} items - Use SPACE to select`, 'success');
+                showStatus(`✅ Loaded ${loadedItems.length} items - Use X/F to mark photos`, 'success');
                 
             } catch (error) {
                 showStatus('❌ Failed to load items: ' + error.message, 'error');
@@ -880,6 +978,8 @@
             rejectedItems.add(itemId);
             updatePhotoCard(itemId);
             updateStats();
+            // Save to OneDrive
+            saveMarkingsToOneDrive();
         }
 
         function markAsChosen(itemId) {
@@ -889,6 +989,8 @@
             chosenItems.add(itemId);
             updatePhotoCard(itemId);
             updateStats();
+            // Save to OneDrive
+            saveMarkingsToOneDrive();
         }
 
         function clearMark(itemId) {
@@ -897,6 +999,8 @@
             chosenItems.delete(itemId);
             updatePhotoCard(itemId);
             updateStats();
+            // Save to OneDrive
+            saveMarkingsToOneDrive();
         }
 
         function updatePhotoCard(itemId) {
