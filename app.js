@@ -1,7 +1,7 @@
 // ---- CONFIG ----
 const msalConfig = {
   auth: {
-    clientId: "YOUR_APP_CLIENT_ID",
+    clientId: "18eebe37-a762-4148-b425-4ee4d79674bf",
     authority: "https://login.microsoftonline.com/consumers", // OneDrive Personal; for Work/School use "common"
     redirectUri: location.origin
   },
