@@ -1,39 +1,71 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>OneDrive Photo Sorter</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: system-ui, sans-serif; margin: 0; }
-    header { padding: 8px 12px; display:flex; gap:8px; align-items:center; border-bottom:1px solid #eee; }
-    #grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:6px; padding:8px; }
-    .cell { position:relative; aspect-ratio:1/1; overflow:hidden; border-radius:6px; border:1px solid #ddd; }
+    :root { --gap:8px; --border:#e5e7eb; --blue:#2563eb; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; color:#111; background:#fff; }
+    header { position:sticky; top:0; z-index:5; background:#fff; border-bottom:1px solid var(--border); padding:8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .grow { flex:1 1 auto; min-width:180px; }
+    button, select { padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:#fafafa; cursor:pointer; }
+    button.primary { background:var(--blue); color:#fff; border-color:transparent; }
+    button.ghost { background:#fff; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    #status { margin-left:auto; font-size:12px; color:#444; }
+    #breadcrumb a { color:#111; text-decoration:none; border-bottom:1px dashed #bbb; }
+    #breadcrumb a:hover { color:var(--blue); border-bottom-color:var(--blue); }
+    main { padding:8px; }
+    #grid { display:grid; grid-template-columns: repeat(5, 1fr); gap:6px; }
+    .cell { position:relative; aspect-ratio:1/1; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#f8fafc; }
     .cell img, .cell video { width:100%; height:100%; object-fit:cover; display:block; }
-    .badge { position:absolute; top:6px; right:6px; background:#0008; color:white; padding:2px 6px; border-radius:999px; font-size:12px;}
-    .focus { outline:3px solid #2b7cff; }
-    #lightbox { position:fixed; inset:0; background:#000c; display:none; align-items:center; justify-content:center; }
-    #lightbox img, #lightbox video { max-width:95vw; max-height:95vh; }
-    .toolbar { display:flex; gap:8px; align-items:center; }
-    button { padding:6px 10px; border-radius:6px; border:1px solid #ddd; background:#fafafa; cursor:pointer; }
-    button.primary { background:#2b7cff; color:white; border:none; }
+    .badge { position:absolute; top:6px; right:6px; background:#000a; color:#fff; padding:2px 6px; border-radius:999px; font-size:12px; }
+    .focus { outline:3px solid var(--blue); outline-offset:-3px; }
+    #lightbox { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:#000c; z-index:10; }
+    #lightbox img, #lightbox video { max-width:95vw; max-height:95vh; background:#000; }
+    #legend { border-top:1px solid var(--border); margin-top:10px; padding:10px; font-size:14px; color:#222; display:grid; gap:6px; }
+    #legend code { background:#f3f4f6; padding:2px 6px; border-radius:6px; }
+    @media (max-width: 920px) {
+      #grid { grid-template-columns: repeat(3, 1fr); }
+    }
   </style>
 </head>
 <body>
   <header>
-    <button id="loginBtn" class="primary">Sign in</button>
     <div class="toolbar">
-      <select id="folderSelect"></select>
-      <button id="modeUnprocessed" class="primary">Unprocessed</button>
-      <button id="modeAll">All</button>
-      <button id="nextPage">Load next 25 (S)</button>
-      <button id="deleteDeclined">Delete declined</button>
-      <button id="downloadChosen">Download chosen</button>
+      <button id="loginBtn" class="primary">Sign in</button>
+      <button id="upBtn" class="ghost" title="Go up one folder">Up</button>
+      <span id="breadcrumb" class="grow"></span>
+      <select id="subfolderSelect" title="Open subfolder"><option>—</option></select>
+      <button id="toggleHideProcessed" class="ghost" title="Hide/Show processed">Hide processed: Off</button>
+      <button id="nextPage" title="Load next 25 (S)">Load next 25 (S)</button>
+      <button id="deleteDeclined" title="Delete all declined from OneDrive">Delete declined</button>
+      <button id="downloadChosen" title="Download all chosen">Download chosen</button>
     </div>
-    <div id="status" style="margin-left:auto;"></div>
+    <div id="status">Idle</div>
   </header>
-  <main id="grid" tabindex="0" aria-label="grid of media"></main>
-  <div id="lightbox"><img/><video controls></video></div>
+
+  <main>
+    <div id="grid" tabindex="0" aria-label="grid of media"></div>
+    <section id="legend">
+      <div><strong>Keyboard:</strong>
+        <span><code>←↑→↓</code> move</span> •
+        <span><code>Space</code> enlarge / close</span> •
+        <span><code>F</code> mark Chosen</span> •
+        <span><code>X</code> mark Declined</span> •
+        <span><code>Backspace</code> clear mark</span> •
+        <span><code>S</code> load next 25</span> •
+        <span><code>H</code> toggle hide processed</span>
+      </div>
+      <div><strong>Mouse:</strong> click an item to focus; click overlay to close.</div>
+      <div><strong>Notes:</strong> Items stay visible after marking so you can rethink on the spot. Your decisions + position are saved per folder and restored on reload.</div>
+    </section>
+  </main>
+
+  <div id="lightbox"><img alt=""><video controls></video></div>
 
   <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
   <script type="module" src="./app.js"></script>
