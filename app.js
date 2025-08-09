@@ -186,8 +186,10 @@ async function loadNextPage(firstPage = false) {
 
   // choose URL: from cursor or fresh page
   const url = nextLink
-    ? nextLink
-    : `https://graph.microsoft.com/v1.0/me/drive/items/${currentFolder}/children?$top=25&$select=id,name,file,photo,video,@microsoft.graph.downloadUrl`;
+  ? nextLink
+  : `https://graph.microsoft.com/v1.0/me/drive/items/${currentFolder}/children` +
+    `?$top=25&$select=id,name,file,photo,video,createdDateTime,@microsoft.graph.downloadUrl` +
+    `&$orderby=createdDateTime desc`;
 
   const data = nextLink ? await authedFetch(url) : await g(url.replace("https://graph.microsoft.com/v1.0", ""));
   // update nextLink
@@ -255,13 +257,29 @@ function setMark(it, newMark) {
 }
 
 // ===== LIGHTBOX =====
-function openLightbox() {
+async function openLightbox() {
   const it = currentItem(); if (!it) return;
-  const isVideo = !!it.video;
-  lbImg.style.display = isVideo ? "none" : "block";
-  lbVid.style.display = isVideo ? "block" : "none";
-  (isVideo ? lbVid : lbImg).src = it["@microsoft.graph.downloadUrl"];
-  lightbox.style.display = "flex";
+  try {
+    // Fetch a fresh, short-lived download URL each time you open
+    const fresh = await g(`/me/drive/items/${it.id}?$select=@microsoft.graph.downloadUrl,video,photo,name`);
+    const url = fresh["@microsoft.graph.downloadUrl"];
+
+    const isVideo = !!it.video; // original metadata is fine to decide media type
+    lbImg.style.display = isVideo ? "none" : "block";
+    lbVid.style.display = isVideo ? "block" : "none";
+
+    if (isVideo) {
+      lbVid.src = url;
+      lbVid.currentTime = 0;
+      lbVid.play().catch(()=>{ /* ignore autoplay block */ });
+    } else {
+      lbImg.src = url;
+    }
+    lightbox.style.display = "flex";
+  } catch (e) {
+    console.error(e);
+    alert("Could not load full media. Try again.");
+  }
 }
 function closeLightbox() { lightbox.style.display = "none"; lbVid.pause(); }
 
