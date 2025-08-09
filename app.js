@@ -186,10 +186,11 @@ async function loadNextPage(firstPage = false) {
 
   // choose URL: from cursor or fresh page
   const url = nextLink
-  ? nextLink
-  : `https://graph.microsoft.com/v1.0/me/drive/items/${currentFolder}/children` +
-    `?$top=25&$select=id,name,file,photo,video,createdDateTime,@microsoft.graph.downloadUrl` +
-    `&$orderby=createdDateTime desc`;
+    ? nextLink
+    : `https://graph.microsoft.com/v1.0/me/drive/items/${currentFolder}/children` +
+      `?$top=25&$select=id,name,file,photo,video,createdDateTime,content.downloadUrl` +
+      `&$orderby=name asc`;
+
 
   const data = nextLink ? await authedFetch(url) : await g(url.replace("https://graph.microsoft.com/v1.0", ""));
   // update nextLink
@@ -261,8 +262,8 @@ async function openLightbox() {
   const it = currentItem(); if (!it) return;
   try {
     // Fetch a fresh, short-lived download URL each time you open
-    const fresh = await g(`/me/drive/items/${it.id}?$select=@microsoft.graph.downloadUrl,video,photo,name`);
-    const url = fresh["@microsoft.graph.downloadUrl"];
+    const fresh = await g(`/me/drive/items/${it.id}?$select=content.downloadUrl,video,photo,name`);
+    const url = fresh["@microsoft.graph.downloadUrl"]; // comes back with @… name
 
     const isVideo = !!it.video; // original metadata is fine to decide media type
     lbImg.style.display = isVideo ? "none" : "block";
