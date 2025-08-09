@@ -559,7 +559,7 @@
 
     <script>
         // Your Azure App Registration Client ID
-        const CLIENT_ID = '18eebe37-a762-4148-b425-4ee4d79674bf';
+        const CLIENT_ID = '18eebe37-a762-4148-b425-4ee4d79674ba';
         let accessToken = null;
         let currentPath = [{ name: 'OneDrive', id: 'root' }];
         let currentFolderId = 'root';
@@ -611,8 +611,8 @@
                         document.getElementById('connectBtn').style.display = 'none';
                         document.getElementById('controls').style.display = 'block';
                         
-                        // Load saved markings from OneDrive
-                        await loadMarkingsFromOneDrive();
+                        // Load saved markings from OneDrive (don't wait for it)
+                        loadMarkingsFromOneDrive();
                         
                         // Load initial folder view
                         loadCurrentFolder();
