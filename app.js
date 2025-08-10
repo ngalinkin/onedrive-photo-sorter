@@ -147,11 +147,11 @@ async function enterCurrentFolder(firstEnter=false) {
 
 // ===== DOWNLOAD URL CACHE =====
 const dlCache = new Map(); // id -> { url, ts }
-const DL_TTL_MS = 10 * 60 * 1000;
-async function getFreshDownloadUrl(id) {
+const DL_TTL_MS = 2 * 60 * 1000; // short TTL to avoid stale links
+async function getDownloadUrl(id, { force = false } = {}) {
   const now = Date.now();
   const hit = dlCache.get(id);
-  if (hit && (now - hit.ts) < DL_TTL_MS) return hit.url;
+  if (!force && hit && (now - hit.ts) < DL_TTL_MS) return hit.url;
 
   const meta = await g(`/me/drive/items/${id}?$select=@microsoft.graph.downloadUrl`);
   const url = meta["@microsoft.graph.downloadUrl"];
@@ -162,6 +162,15 @@ async function getFreshDownloadUrl(id) {
 
 // ===== LOAD & RENDER =====
 function shouldShowItem(it, st){ return hideProcessed ? !st.processed[it.id] : true; }
+
+function applyMarkStyles(cell, mark) {
+  const badge = cell.querySelector(".badge");
+  cell.classList.remove("chosen","declined");
+  badge.classList.remove("chosen","declined");
+  if (mark === "F") { cell.classList.add("chosen");   badge.classList.add("chosen");   badge.textContent = "F"; }
+  else if (mark === "X") { cell.classList.add("declined"); badge.classList.add("declined"); badge.textContent = "X"; }
+  else { badge.textContent = ""; }
+}
 
 function renderItem(it, mark) {
   const cell = document.createElement("div");
@@ -200,8 +209,8 @@ function renderItem(it, mark) {
 
   const badge = document.createElement("div");
   badge.className = "badge";
-  badge.textContent = mark || "";
   cell.appendChild(badge);
+  applyMarkStyles(cell, mark);
 
   cell.addEventListener("click", () => {
     const idx = items.findIndex(x => x.id === it.id);
@@ -238,12 +247,17 @@ async function loadNextPage(firstPage=false) {
   page.forEach((it,i)=>{ it._thumb = thumbs[i]; });
 
   const visible = page.filter(it => shouldShowItem(it, st));
-  items = [...items, ...visible];
-  for (const it of visible) renderItem(it, st.processed[it.id]);
+
+  // >>> REPLACE grid with this page only (max 25) <<<
+  grid.innerHTML = "";
+  items = [];
+  for (const it of visible.slice(0, 25)) {
+    renderItem(it, st.processed[it.id]);
+    items.push(it);
+  }
+  setFocus(0);
 
   saveState(currentFolder, { ...st, cursor: nextLink });
-
-  if (firstPage) setFocus(0);
   setStatus(nextLink ? "More available" : "End of folder");
 }
 
@@ -256,7 +270,7 @@ function setMark(it, newMark){
   saveState(currentFolder, st);
 
   const cell = grid.children[focusIdx];
-  if (cell) cell.querySelector(".badge").textContent = newMark || "";
+  if (cell) applyMarkStyles(cell, newMark);
 
   if (hideProcessed && newMark){
     cell.remove();
@@ -267,56 +281,89 @@ function setMark(it, newMark){
 }
 
 function lightboxOpen(){ return lightbox.style.display === "flex"; }
+
+function closeLightbox() {
+  lightbox.style.display = "none";
+  try { lbVid.pause(); } catch {}
+  lbVid.src = "";
+  lbImg.src = "";
+}
+
 let lbTicket = 0; // avoid races when toggling fast
 
 async function toggleLightbox(){
-  if (lightboxOpen()) {
-    lightbox.style.display = "none";
-    lbVid.pause();
-    return;
-  }
+  if (lightboxOpen()) { closeLightbox(); return; }
+
   const it = currentItem(); 
   if (!it) return;
-  
-  // Extensions the browser can't show inline
+
+  // Fallback for formats browsers can't show inline
   const unsupportedExts = [".heic", ".nef", ".cr2", ".arw", ".orf", ".rw2", ".dng"];
-  const ext = it.name ? it.name.toLowerCase().split(".").pop() : "";
-  if (unsupportedExts.includes("." + ext) && it._thumb) {
-    // Fallback: show the JPEG thumbnail instead
+  const ext = it.name ? ("." + it.name.toLowerCase().split(".").pop()) : "";
+  if (unsupportedExts.includes(ext) && it._thumb) {
     lbImg.style.display = "block";
     lbVid.style.display = "none";
-    lbImg.src = it._thumb;
+    lbImg.src = it._thumb;     // show large JPEG thumbnail instead
     lightbox.style.display = "flex";
     setStatus(nextLink ? "More available" : "Ready");
-    return; // skip fetching original
+    return;
   }
-  
+
   const my = ++lbTicket;
   setStatus("Loading preview…");
-  try {
-    const url = await getFreshDownloadUrl(it.id);
 
-
-    if (my !== lbTicket) return; // newer open happened
+  async function tryLoad({ forceUrl = false } = {}) {
+    const url = await getDownloadUrl(it.id, { force: forceUrl });
     const isVideo = !!it.video;
+
     lbImg.style.display = isVideo ? "none" : "block";
     lbVid.style.display = isVideo ? "block" : "none";
 
-    if (isVideo) {
-      lbVid.preload = "metadata";   // quick start
-      lbVid.src = url;
-      lbVid.currentTime = 0;
-      // let user press play; no forced autoplay
-    } else {
-      lbImg.src = url;
-    }
-
     lightbox.style.display = "flex";
-  } catch (e) {
-    console.error(e);
-    alert("Could not load media. Try again.");
+
+    return new Promise((resolve, reject) => {
+      if (isVideo) {
+        lbVid.preload = "metadata";
+        lbVid.src = url;
+
+        const onLoaded = () => { cleanup(); resolve(); };
+        const onError  = () => { cleanup(); reject(new Error("video error")); };
+
+        function cleanup() {
+          lbVid.removeEventListener("loadedmetadata", onLoaded);
+          lbVid.removeEventListener("error", onError);
+        }
+        lbVid.addEventListener("loadedmetadata", onLoaded, { once: true });
+        lbVid.addEventListener("error", onError, { once: true });
+      } else {
+        lbImg.src = url;
+
+        const onLoaded = () => { cleanup(); resolve(); };
+        const onError  = () => { cleanup(); reject(new Error("image error")); };
+
+        function cleanup() {
+          lbImg.removeEventListener("load", onLoaded);
+          lbImg.removeEventListener("error", onError);
+        }
+        lbImg.addEventListener("load", onLoaded, { once: true });
+        lbImg.addEventListener("error", onError, { once: true });
+      }
+    });
+  }
+
+  try {
+    await tryLoad({ forceUrl: false });   // first attempt (cached URL ok)
+  } catch (e1) {
+    console.warn("[LB] first load failed, retrying with fresh URL", e1);
+    try {
+      await tryLoad({ forceUrl: true });  // second attempt (force refresh URL)
+    } catch (e2) {
+      console.error("[LB] second load failed", e2);
+      closeLightbox();
+      alert("Could not load media (network or URL expired). Try again.");
+    }
   } finally {
-    setStatus(nextLink ? "More available" : "Ready");
+    if (my === lbTicket) setStatus(nextLink ? "More available" : "Ready");
   }
 }
 
@@ -339,7 +386,7 @@ async function deleteDeclined(){
   }
   ids.forEach(id=>{ delete st.processed[id]; });
   saveState(currentFolder, st);
-  // remove from view too
+  // remove from view too (if present)
   for (let i=grid.children.length-1;i>=0;i--){
     const cell = grid.children[i];
     if (ids.includes(cell.dataset.id)){
@@ -358,8 +405,8 @@ async function downloadChosen(){
   const chosen = Object.entries(st.processed).filter(([,m])=>m==="F").map(([id])=>id);
   if (!chosen.length) return alert("Nothing chosen.");
   for (const id of chosen){
-    const url = await getFreshDownloadUrl(id);
-    // Fetch name (optional)
+    const url = await getDownloadUrl(id, { force: false });
+    // name is optional
     let name = "file";
     try {
       const meta = await g(`/me/drive/items/${id}?$select=name`);
@@ -399,7 +446,7 @@ subfolderSelect.onchange = (e) => {
 toggleHideProcessedBtn.onclick = () => {
   hideProcessed = !hideProcessed; updateHideProcessedBtn();
   const st = loadState(currentFolder); saveState(currentFolder, { ...st, hideProcessed });
-  // refresh current view according to filter
+  // refresh current page according to filter, keeping just these 25 items
   const keep = items.slice();
   grid.innerHTML = ""; items = [];
   const st2 = loadState(currentFolder);
@@ -410,7 +457,7 @@ toggleHideProcessedBtn.onclick = () => {
 nextPageBtn.onclick = () => loadNextPage(false);
 deleteDeclinedBtn.onclick = () => deleteDeclined();
 downloadChosenBtn.onclick = () => downloadChosen();
-lightbox.addEventListener("click", () => { lightbox.style.display = "none"; lbVid.pause(); });
+lightbox.addEventListener("click", () => { closeLightbox(); });
 
 // Global keyboard: works without clicking first. Ignore when typing in inputs/selects.
 document.addEventListener("keydown", (e) => {
