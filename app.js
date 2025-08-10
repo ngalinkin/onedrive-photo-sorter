@@ -248,7 +248,7 @@ async function loadNextPage(firstPage=false) {
 
   const visible = page.filter(it => shouldShowItem(it, st));
 
-  // >>> REPLACE grid with this page only (max 25) <<<
+  // REPLACE grid with this page only (max 25)
   grid.innerHTML = "";
   items = [];
   for (const it of visible.slice(0, 25)) {
@@ -399,25 +399,95 @@ async function deleteDeclined(){
   alert("Declined files deleted.");
 }
 
-async function downloadChosen(){
+async function downloadChosen() {
   if (!currentFolder) return;
   const st = loadState(currentFolder);
-  const chosen = Object.entries(st.processed).filter(([,m])=>m==="F").map(([id])=>id);
+  const chosen = Object.entries(st.processed).filter(([, m]) => m === "F").map(([id]) => id);
   if (!chosen.length) return alert("Nothing chosen.");
-  for (const id of chosen){
-    const url = await getDownloadUrl(id, { force: false });
-    // name is optional
-    let name = "file";
+
+  setStatus(`Fetching ${chosen.length} files…`);
+
+  async function fetchBytes(url, attempt = 0) {
+    const r = await fetch(url);
+    if (r.status === 429 && attempt < 1) {
+      const ra = parseInt(r.headers.get("Retry-After") || "2", 10) * 1000;
+      await new Promise(res => setTimeout(res, isFinite(ra) ? ra : 2000));
+      return fetchBytes(url, attempt + 1);
+    }
+    if (!r.ok) throw new Error(`Download failed: ${r.status}`);
+    return new Uint8Array(await r.arrayBuffer());
+  }
+
+  const maxConcurrent = 4;
+  let idx = 0;
+  const entries = [];
+  const errors = [];
+
+  async function worker() {
+    while (idx < chosen.length) {
+      const i = idx++;
+      try {
+        const meta = await g(`/me/drive/items/${chosen[i]}?$select=name,@microsoft.graph.downloadUrl`);
+        const name = meta?.name || `file_${i}`;
+        const url = meta?.["@microsoft.graph.downloadUrl"];
+        if (!url) throw new Error("No downloadUrl");
+        const bytes = await fetchBytes(url);
+        entries.push([name, bytes]);
+        setStatus(`Fetched ${entries.length}/${chosen.length}…`);
+      } catch (e) {
+        console.error("Fetch error", e);
+        errors.push({ id: chosen[i], error: e.toString() });
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(maxConcurrent, chosen.length) }, worker));
+
+  if (!entries.length) {
+    alert("Could not fetch any files.");
+    setStatus("Ready");
+    return;
+  }
+
+  setStatus("Zipping…");
+
+  const fileMap = {};
+  for (const [name, bytes] of entries) fileMap[name] = bytes;
+  const zipped = fflate.zipSync(fileMap, { level: 6 });
+  const blob = new Blob([zipped], { type: "application/zip" });
+
+  const suggested = `chosen_${new Date().toISOString().slice(0,19).replace(/[:T]/g, "-")}.zip`;
+  if (window.showSaveFilePicker) {
     try {
-      const meta = await g(`/me/drive/items/${id}?$select=name`);
-      if (meta && meta.name) name = meta.name;
-    } catch {}
+      const handle = await window.showSaveFilePicker({
+        suggestedName: suggested,
+        types: [{ description: "ZIP archive", accept: { "application/zip": [".zip"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      setStatus("Saved ZIP.");
+    } catch (e) {
+      console.warn("Save picker failed, falling back to download", e);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = suggested;
+      document.body.appendChild(a);
+      a.click(); a.remove();
+      setStatus("Downloaded ZIP.");
+    }
+  } else {
     const a = document.createElement("a");
-    a.href = url;
-    a.download = name;
-    a.target = "_blank";
-    a.style.display="none";
-    document.body.appendChild(a); a.click(); a.remove();
+    a.href = URL.createObjectURL(blob);
+    a.download = suggested;
+    document.body.appendChild(a);
+    a.click(); a.remove();
+    setStatus("Downloaded ZIP.");
+  }
+
+  if (errors.length) {
+    console.warn("Some files failed to fetch:", errors);
+    alert(`Finished with ${errors.length} fetch error(s). Check console for details.`);
   }
 }
 
@@ -446,7 +516,7 @@ subfolderSelect.onchange = (e) => {
 toggleHideProcessedBtn.onclick = () => {
   hideProcessed = !hideProcessed; updateHideProcessedBtn();
   const st = loadState(currentFolder); saveState(currentFolder, { ...st, hideProcessed });
-  // refresh current page according to filter, keeping just these 25 items
+  // refresh current page according to filter (keep just these 25)
   const keep = items.slice();
   grid.innerHTML = ""; items = [];
   const st2 = loadState(currentFolder);
