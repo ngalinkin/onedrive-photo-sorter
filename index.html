@@ -11,14 +11,14 @@
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; color:#111; background:#fff; }
 
     header { position:sticky; top:0; z-index:5; background:#fff; border-bottom:1px solid var(--border);
-             padding:8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+             padding:8px; display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center; }
     .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .grow { flex:1 1 auto; min-width:180px; }
     button, select { padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:#fafafa; cursor:pointer; }
     button.primary { background:var(--blue); color:#fff; border-color:transparent; }
     button.ghost { background:#fff; }
     button:disabled { opacity:.5; cursor:not-allowed; }
-    #status { margin-left:auto; font-size:12px; color:#444; }
+    #status { font-size:12px; color:#444; text-align:right; }
     #breadcrumb a { color:#111; text-decoration:none; border-bottom:1px dashed #bbb; }
     #breadcrumb a:hover { color:var(--blue); border-bottom-color:var(--blue); }
 
@@ -28,7 +28,6 @@
     #grid { display:grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(5, 1fr); gap:6px; height:60vh; }
     .cell { position:relative; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#f8fafc;
             display:flex; align-items:center; justify-content:center; }
-    /* Show whole media without cropping */
     .cell img, .cell video { max-width:100%; max-height:100%; object-fit:contain; display:block; }
 
     .badge { position:absolute; top:6px; right:6px; background:#000a; color:#fff; padding:2px 6px; border-radius:999px; font-size:12px; }
@@ -46,9 +45,7 @@
     #legend { border-top:1px solid var(--border); margin-top:10px; padding:10px; font-size:14px; color:#222; display:grid; gap:6px; }
     #legend code { background:#f3f4f6; padding:2px 6px; border-radius:6px; }
 
-    @media (max-width: 920px) {
-      #grid { grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(5, 1fr); }
-    }
+    .counter { font-size:12px; color:#111; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   </style>
 </head>
 <body>
@@ -57,12 +54,31 @@
       <button id="loginBtn" class="primary">Sign in</button>
       <button id="upBtn" class="ghost" title="Go up one folder">Up</button>
       <span id="breadcrumb" class="grow"></span>
+
       <select id="subfolderSelect" title="Open subfolder"><option>—</option></select>
+
+      <select id="filterMode" title="Filter">
+        <option value="all">All</option>
+        <option value="chosen">Chosen only</option>
+        <option value="declined">Declined only</option>
+        <option value="unprocessed">Unprocessed only</option>
+      </select>
+
       <button id="toggleHideProcessed" class="ghost" title="Hide/Show processed">Hide processed: Off</button>
-      <button id="nextPage" title="Load next 25 (S)">Load next 25 (S)</button>
+
+      <button id="prevPage" title="Previous 25">◀ Prev</button>
+      <button id="nextPage" title="Next 25 (S)">Next ▶</button>
+
       <button id="deleteDeclined" title="Delete all declined from OneDrive">Delete declined</button>
       <button id="downloadChosen" title="Download all chosen as ZIP">Download chosen (ZIP)</button>
+      <button id="downloadNotChosen" title="Download all NOT chosen as ZIP(s)">Download NOT chosen</button>
     </div>
+
+    <div class="counter">
+      <span id="counterMain">— / —</span>
+      <span id="counterPage">(page — of —)</span>
+    </div>
+
     <div id="status">Idle</div>
   </header>
 
@@ -76,11 +92,10 @@
         <span><code>F</code> mark Chosen</span> •
         <span><code>X</code> mark Declined</span> •
         <span><code>Backspace</code> clear mark</span> •
-        <span><code>S</code> load next 25</span> •
+        <span><code>S</code> next page (25)</span> •
         <span><code>H</code> toggle hide processed</span>
       </div>
-      <div><strong>Mouse:</strong> click an item to focus; click overlay to close.</div>
-      <div><strong>Notes:</strong> Exactly 25 items per page. Items stay visible after marking so you can rethink on the spot. Your decisions + position are saved per folder.</div>
+      <div><strong>Mouse:</strong> hover marks item as processed; click to focus; click overlay to close.</div>
     </section>
   </main>
 
