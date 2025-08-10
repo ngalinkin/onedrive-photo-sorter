@@ -24,7 +24,7 @@
 
     main { padding:8px; }
 
-    /* Grid: exactly 5x5 cells; auto-sizes to viewport height under the header+legend */
+    /* Grid: 5x5; JS will adjust height to fit viewport under header+legend */
     #grid { display:grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(5, 1fr); gap:6px; height:60vh; }
     .cell { position:relative; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#f8fafc;
             display:flex; align-items:center; justify-content:center; }
@@ -33,6 +33,12 @@
 
     .badge { position:absolute; top:6px; right:6px; background:#000a; color:#fff; padding:2px 6px; border-radius:999px; font-size:12px; }
     .focus { outline:3px solid var(--blue); outline-offset:-3px; }
+
+    /* Mark styling */
+    .cell.chosen   { box-shadow: 0 0 0 3px rgba(16,185,129,.95) inset; }  /* green */
+    .cell.declined { box-shadow: 0 0 0 3px rgba(239,68,68,.95) inset; }   /* red */
+    .badge.chosen  { background:#10b981; }
+    .badge.declined{ background:#ef4444; }
 
     #lightbox { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:#000c; z-index:10; }
     #lightbox img, #lightbox video { max-width:95vw; max-height:95vh; background:#000; }
@@ -74,7 +80,7 @@
         <span><code>H</code> toggle hide processed</span>
       </div>
       <div><strong>Mouse:</strong> click an item to focus; click overlay to close.</div>
-      <div><strong>Notes:</strong> Items stay visible after marking so you can rethink on the spot. Your decisions + position are saved per folder and restored on reload.</div>
+      <div><strong>Notes:</strong> Exactly 25 items per page. Items stay visible after marking so you can rethink on the spot. Your decisions + position are saved per folder and restored on reload.</div>
     </section>
   </main>
 
