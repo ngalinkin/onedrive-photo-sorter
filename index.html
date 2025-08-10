@@ -24,11 +24,11 @@
 
     main { padding:8px; }
 
-    /* Grid: 5x5; JS will adjust height to fit viewport under header+legend */
+    /* Grid: 5x5; JS adjusts height to fit under header+legend */
     #grid { display:grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(5, 1fr); gap:6px; height:60vh; }
     .cell { position:relative; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#f8fafc;
             display:flex; align-items:center; justify-content:center; }
-    /* Show the whole media without cropping */
+    /* Show whole media without cropping */
     .cell img, .cell video { max-width:100%; max-height:100%; object-fit:contain; display:block; }
 
     .badge { position:absolute; top:6px; right:6px; background:#000a; color:#fff; padding:2px 6px; border-radius:999px; font-size:12px; }
@@ -61,7 +61,7 @@
       <button id="toggleHideProcessed" class="ghost" title="Hide/Show processed">Hide processed: Off</button>
       <button id="nextPage" title="Load next 25 (S)">Load next 25 (S)</button>
       <button id="deleteDeclined" title="Delete all declined from OneDrive">Delete declined</button>
-      <button id="downloadChosen" title="Download all chosen">Download chosen</button>
+      <button id="downloadChosen" title="Download all chosen as ZIP">Download chosen (ZIP)</button>
     </div>
     <div id="status">Idle</div>
   </header>
@@ -80,13 +80,15 @@
         <span><code>H</code> toggle hide processed</span>
       </div>
       <div><strong>Mouse:</strong> click an item to focus; click overlay to close.</div>
-      <div><strong>Notes:</strong> Exactly 25 items per page. Items stay visible after marking so you can rethink on the spot. Your decisions + position are saved per folder and restored on reload.</div>
+      <div><strong>Notes:</strong> Exactly 25 items per page. Items stay visible after marking so you can rethink on the spot. Your decisions + position are saved per folder.</div>
     </section>
   </main>
 
   <div id="lightbox"><img alt=""><video controls></video></div>
 
   <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+  <!-- ZIP library -->
+  <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.min.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
