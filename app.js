@@ -1,4 +1,4 @@
-// ===== CONFIG =====
+// ===== CONFIG ===== 
 const msalConfig = {
   auth: {
     clientId: "18eebe37-a762-4148-b425-4ee4d79674bf",        // <-- paste your Azure App Registration "Application (client) ID"
