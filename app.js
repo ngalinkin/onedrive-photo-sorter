@@ -1,7 +1,7 @@
 // ===== CONFIG =====
 const msalConfig = {
   auth: {
-    clientId: "18eebe37-a762-4148-b425-4ee4d79674bf",        // <-- paste Application (client) ID
+    clientId: "18eebe37-a762-4148-b425-4ee4d79674bf",        // <-- paste your Azure App Registration "Application (client) ID"
     authority: "https://login.microsoftonline.com/consumers",
     redirectUri: location.origin
   },
@@ -29,19 +29,30 @@ async function getToken() {
   catch { return (await msalInstance.acquireTokenPopup(req)).accessToken; }
 }
 
-async function g(path, opts = {}) {
+// one retry on 429 using Retry-After
+async function g(path, opts = {}, attempt = 0) {
   const token = await getToken();
   const r = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
     ...opts,
     headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", ...(opts.headers||{}) }
   });
+
+  if (r.status === 429 && attempt < 1) {
+    const ra = parseInt(r.headers.get("Retry-After") || "2", 10) * 1000;
+    await new Promise(res => setTimeout(res, isFinite(ra) ? ra : 2000));
+    return g(path, opts, attempt + 1);
+  }
   if (!r.ok) throw new Error(await r.text());
   try { return await r.json(); } catch { return {}; }
 }
-
-async function authedFetch(fullUrl) {
+async function authedFetch(fullUrl, attempt = 0) {
   const token = await getToken();
   const r = await fetch(fullUrl, { headers: { Authorization: `Bearer ${token}` } });
+  if (r.status === 429 && attempt < 1) {
+    const ra = parseInt(r.headers.get("Retry-After") || "2", 10) * 1000;
+    await new Promise(res => setTimeout(res, isFinite(ra) ? ra : 2000));
+    return authedFetch(fullUrl, attempt + 1);
+  }
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -78,8 +89,8 @@ let hideProcessed = false;
 
 // ===== Layout: make 5x5 fit viewport =====
 function layoutGrid() {
-  const available = window.innerHeight - headerEl.offsetHeight - legendEl.offsetHeight - 16; // gap
-  const min = 300; // fallback
+  const available = window.innerHeight - headerEl.offsetHeight - legendEl.offsetHeight - 16;
+  const min = 300; // safety
   grid.style.height = Math.max(available, min) + "px";
 }
 window.addEventListener("resize", layoutGrid);
@@ -114,7 +125,7 @@ async function listSubfolders(folderId) {
 }
 
 async function enterCurrentFolder(firstEnter=false) {
-  layoutGrid(); // ensure correct height
+  layoutGrid();
   const { id } = pathStack[pathStack.length - 1];
   currentFolder = id;
   renderBreadcrumb();
@@ -130,8 +141,23 @@ async function enterCurrentFolder(firstEnter=false) {
 
   nextLink = null; // fresh load
   await loadNextPage(true);
-  // keep persisted cursor for subsequent S presses
+  // persist cursor for subsequent S presses
   nextLink = st.cursor || nextLink;
+}
+
+// ===== DOWNLOAD URL CACHE =====
+const dlCache = new Map(); // id -> { url, ts }
+const DL_TTL_MS = 10 * 60 * 1000;
+async function getFreshDownloadUrl(id) {
+  const now = Date.now();
+  const hit = dlCache.get(id);
+  if (hit && (now - hit.ts) < DL_TTL_MS) return hit.url;
+
+  const meta = await g(`/me/drive/items/${id}?$select=@microsoft.graph.downloadUrl`);
+  const url = meta["@microsoft.graph.downloadUrl"];
+  if (!url) throw new Error("No downloadUrl");
+  dlCache.set(id, { url, ts: now });
+  return url;
 }
 
 // ===== LOAD & RENDER =====
@@ -144,8 +170,32 @@ function renderItem(it, mark) {
 
   const isVideo = !!it.video;
   const mediaEl = isVideo ? document.createElement("video") : document.createElement("img");
-  if (isVideo){ mediaEl.muted = true; mediaEl.playsInline = true; mediaEl.controls = false; }
-  mediaEl.src = it._thumb || it["content@odata.mediaReadLink"] || it["@microsoft.graph.downloadUrl"] || it.contentUrl || it.content?.downloadUrl;
+
+  if (isVideo) {
+    mediaEl.muted = true;
+    mediaEl.playsInline = true;
+    mediaEl.controls = false;
+    mediaEl.preload = "none";               // don't fetch video in grid
+    if (it._thumb) mediaEl.poster = it._thumb; // use thumbnail as poster
+    // subtle play overlay
+    const play = document.createElement("div");
+    play.style.position = "absolute";
+    play.style.inset = "0";
+    play.style.display = "flex";
+    play.style.alignItems = "center";
+    play.style.justifyContent = "center";
+    play.style.pointerEvents = "none";
+    play.style.fontSize = "42px";
+    play.style.color = "white";
+    play.style.textShadow = "0 1px 2px rgba(0,0,0,.6)";
+    play.textContent = "▶";
+    cell.appendChild(play);
+  } else {
+    mediaEl.loading = "lazy";
+    mediaEl.decoding = "async";
+    mediaEl.src = it._thumb || "";
+  }
+
   cell.appendChild(mediaEl);
 
   const badge = document.createElement("div");
@@ -169,7 +219,7 @@ async function loadNextPage(firstPage=false) {
   const url = nextLink
     ? nextLink
     : `https://graph.microsoft.com/v1.0/me/drive/items/${currentFolder}/children` +
-      `?$top=25&$select=id,name,file,photo,video,createdDateTime,content.downloadUrl` +
+      `?$top=25&$select=id,name,file,photo,video,createdDateTime` +
       `&$orderby=name asc`;
 
   const data = nextLink ? await authedFetch(url) : await g(url.replace("https://graph.microsoft.com/v1.0",""));
@@ -177,7 +227,7 @@ async function loadNextPage(firstPage=false) {
 
   let page = data.value.filter(x => x.file);
 
-  // thumbnails
+  // thumbnails for all (photos & videos)
   const thumbs = await Promise.all(page.map(async it=>{
     try {
       const t = await g(`/me/drive/items/${it.id}/thumbnails`);
@@ -217,22 +267,40 @@ function setMark(it, newMark){
 }
 
 function lightboxOpen(){ return lightbox.style.display === "flex"; }
-async function openLightboxFresh(){
+let lbTicket = 0; // avoid races when toggling fast
+
+async function toggleLightbox(){
+  if (lightboxOpen()) {
+    lightbox.style.display = "none";
+    lbVid.pause();
+    return;
+  }
   const it = currentItem(); if (!it) return;
+  const my = ++lbTicket;
+  setStatus("Loading preview…");
   try {
-    const fresh = await g(`/me/drive/items/${it.id}?$select=content.downloadUrl,video,photo,name`);
-    const url = fresh["@microsoft.graph.downloadUrl"];
+    const url = await getFreshDownloadUrl(it.id);
+    if (my !== lbTicket) return; // newer open happened
     const isVideo = !!it.video;
     lbImg.style.display = isVideo ? "none" : "block";
     lbVid.style.display = isVideo ? "block" : "none";
-    if (isVideo){ lbVid.src = url; lbVid.currentTime = 0; lbVid.play().catch(()=>{}); }
-    else { lbImg.src = url; }
+
+    if (isVideo) {
+      lbVid.preload = "metadata";   // quick start
+      lbVid.src = url;
+      lbVid.currentTime = 0;
+      // let user press play; no forced autoplay
+    } else {
+      lbImg.src = url;
+    }
+
     lightbox.style.display = "flex";
-  } catch (e) { console.error(e); alert("Could not load full media. Try again."); }
-}
-function toggleLightbox(){
-  if (lightboxOpen()) { lightbox.style.display = "none"; lbVid.pause(); }
-  else { openLightboxFresh(); }
+  } catch (e) {
+    console.error(e);
+    alert("Could not load media. Try again.");
+  } finally {
+    setStatus(nextLink ? "More available" : "Ready");
+  }
 }
 
 // ===== BULK =====
@@ -254,7 +322,7 @@ async function deleteDeclined(){
   }
   ids.forEach(id=>{ delete st.processed[id]; });
   saveState(currentFolder, st);
-  // remove from view
+  // remove from view too
   for (let i=grid.children.length-1;i>=0;i--){
     const cell = grid.children[i];
     if (ids.includes(cell.dataset.id)){
@@ -273,10 +341,16 @@ async function downloadChosen(){
   const chosen = Object.entries(st.processed).filter(([,m])=>m==="F").map(([id])=>id);
   if (!chosen.length) return alert("Nothing chosen.");
   for (const id of chosen){
-    const it = await g(`/me/drive/items/${id}?$select=content.downloadUrl,name`);
+    const url = await getFreshDownloadUrl(id);
+    // Fetch name (optional)
+    let name = "file";
+    try {
+      const meta = await g(`/me/drive/items/${id}?$select=name`);
+      if (meta && meta.name) name = meta.name;
+    } catch {}
     const a = document.createElement("a");
-    a.href = it["@microsoft.graph.downloadUrl"];
-    a.download = it.name;
+    a.href = url;
+    a.download = name;
     a.target = "_blank";
     a.style.display="none";
     document.body.appendChild(a); a.click(); a.remove();
