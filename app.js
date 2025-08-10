@@ -1,4 +1,4 @@
-// ===== CONFIG ===== 
+// ===== CONFIG =====
 const msalConfig = {
   auth: {
     clientId: "18eebe37-a762-4148-b425-4ee4d79674bf",        // <-- paste your Azure App Registration "Application (client) ID"
@@ -399,6 +399,7 @@ async function deleteDeclined(){
   alert("Declined files deleted.");
 }
 
+// ===== ZIP DOWNLOAD (all chosen in current folder) =====
 async function downloadChosen() {
   if (!currentFolder) return;
   const st = loadState(currentFolder);
@@ -407,36 +408,69 @@ async function downloadChosen() {
 
   setStatus(`Fetching ${chosen.length} files…`);
 
-  async function fetchBytes(url, attempt = 0) {
-    const r = await fetch(url);
-    if (r.status === 429 && attempt < 1) {
-      const ra = parseInt(r.headers.get("Retry-After") || "2", 10) * 1000;
-      await new Promise(res => setTimeout(res, isFinite(ra) ? ra : 2000));
-      return fetchBytes(url, attempt + 1);
+  // name helper (tolerant)
+  async function getName(id) {
+    try {
+      const meta = await g(`/me/drive/items/${id}`); // no $select to avoid projection quirks
+      return meta?.name || id;
+    } catch {
+      return id;
     }
-    if (!r.ok) throw new Error(`Download failed: ${r.status}`);
-    return new Uint8Array(await r.arrayBuffer());
+  }
+
+  // helper: fetch bytes for a driveItem id with multiple fallbacks
+  async function fetchBytesFor(id) {
+    // 1) cached/fresh downloadUrl
+    try {
+      const url1 = await getDownloadUrl(id, { force: false });
+      const r1 = await fetch(url1);
+      if (r1.ok) return new Uint8Array(await r1.arrayBuffer());
+    } catch {}
+
+    try {
+      const url2 = await getDownloadUrl(id, { force: true });
+      const r2 = await fetch(url2);
+      if (r2.ok) return new Uint8Array(await r2.arrayBuffer());
+    } catch {}
+
+    // 2) fetch full metadata (sometimes includes the field)
+    try {
+      const meta = await g(`/me/drive/items/${id}`);
+      const url3 = meta && meta["@microsoft.graph.downloadUrl"];
+      if (url3) {
+        const r3 = await fetch(url3);
+        if (r3.ok) return new Uint8Array(await r3.arrayBuffer());
+      }
+    } catch {}
+
+    // 3) last resort: stream via Graph /content (302 to CDN; fetch follows)
+    try {
+      const token = await getToken();
+      const r4 = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${id}/content`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (r4.ok) return new Uint8Array(await r4.arrayBuffer());
+    } catch {}
+
+    throw new Error("No downloadable content");
   }
 
   const maxConcurrent = 4;
-  let idx = 0;
+  let index = 0;
   const entries = [];
   const errors = [];
 
   async function worker() {
-    while (idx < chosen.length) {
-      const i = idx++;
+    while (index < chosen.length) {
+      const my = index++;
+      const id = chosen[my];
       try {
-        const meta = await g(`/me/drive/items/${chosen[i]}?$select=name,@microsoft.graph.downloadUrl`);
-        const name = meta?.name || `file_${i}`;
-        const url = meta?.["@microsoft.graph.downloadUrl"];
-        if (!url) throw new Error("No downloadUrl");
-        const bytes = await fetchBytes(url);
+        const [name, bytes] = await Promise.all([getName(id), fetchBytesFor(id)]);
         entries.push([name, bytes]);
         setStatus(`Fetched ${entries.length}/${chosen.length}…`);
       } catch (e) {
-        console.error("Fetch error", e);
-        errors.push({ id: chosen[i], error: e.toString() });
+        console.warn("Fetch failed for", id, e);
+        errors.push({ id, error: String(e) });
       }
     }
   }
@@ -444,13 +478,12 @@ async function downloadChosen() {
   await Promise.all(Array.from({ length: Math.min(maxConcurrent, chosen.length) }, worker));
 
   if (!entries.length) {
-    alert("Could not fetch any files.");
+    alert(`Could not fetch any files. (${errors.length} error(s)) Check the console for details.`);
     setStatus("Ready");
     return;
   }
 
   setStatus("Zipping…");
-
   const fileMap = {};
   for (const [name, bytes] of entries) fileMap[name] = bytes;
   const zipped = fflate.zipSync(fileMap, { level: 6 });
@@ -487,7 +520,7 @@ async function downloadChosen() {
 
   if (errors.length) {
     console.warn("Some files failed to fetch:", errors);
-    alert(`Finished with ${errors.length} fetch error(s). Check console for details.`);
+    alert(`Finished with ${errors.length} fetch error(s). See console for details.`);
   }
 }
 
