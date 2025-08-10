@@ -275,11 +275,25 @@ async function toggleLightbox(){
     lbVid.pause();
     return;
   }
-  const it = currentItem(); if (!it) return;
+  const it = currentItem(); 
+  if (!it) return;
+  
+  const isHEIC = it.name && it.name.toLowerCase().endsWith(".heic");
+  if (isHEIC && it._thumb) {
+    // Browser can't render HEIC, so just use JPEG thumbnail
+    lbImg.style.display = "block";
+    lbVid.style.display = "none";
+    lbImg.src = it._thumb;
+    lightbox.style.display = "flex";
+    setStatus(nextLink ? "More available" : "Ready");
+    return; // stop here, skip download URL
+  }
+  
   const my = ++lbTicket;
   setStatus("Loading preview…");
   try {
     const url = await getFreshDownloadUrl(it.id);
+
     if (my !== lbTicket) return; // newer open happened
     const isVideo = !!it.video;
     lbImg.style.display = isVideo ? "none" : "block";
