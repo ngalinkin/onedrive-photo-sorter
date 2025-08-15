@@ -59,11 +59,29 @@ async function authedFetch(fullUrl, attempt = 0) {
 
 // ===== STATE (per folder) =====
 const storeKey = (folderId) => `ps:${folderId}`;
+
 function loadState(folderId) {
-  return JSON.parse(localStorage.getItem(storeKey(folderId)) ||
-    `{"processed":{},"soft":{},"cursor":null,"hideProcessed":false,"filterMode":"all","pageIndex":0}`);
+  const def = { processed:{}, soft:{}, cursor:null, hideProcessed:false, filterMode:"all", pageIndex:0 };
+  let s;
+  try { s = JSON.parse(localStorage.getItem(storeKey(folderId)) || "{}"); }
+  catch { s = {}; }
+  // merge + sanitize
+  s = { ...def, ...s };
+  if (!s.processed || typeof s.processed !== "object") s.processed = {};
+  if (!s.soft || typeof s.soft !== "object") s.soft = {};
+  if (typeof s.hideProcessed !== "boolean") s.hideProcessed = false;
+  if (!["all","chosen","declined","unprocessed"].includes(s.filterMode)) s.filterMode = "all";
+  if (!Number.isInteger(s.pageIndex) || s.pageIndex < 0) s.pageIndex = 0;
+  if (s.cursor !== null && typeof s.cursor !== "string") s.cursor = null;
+  return s;
 }
-function saveState(folderId, s) { localStorage.setItem(storeKey(folderId), JSON.stringify(s)); }
+
+function saveState(folderId, s) {
+  // ensure required keys exist before writing
+  const out = loadState(folderId);
+  Object.assign(out, s);
+  localStorage.setItem(storeKey(folderId), JSON.stringify(out));
+}
 
 // ===== DOM =====
 const grid = document.getElementById("grid");
@@ -217,22 +235,28 @@ async function getDownloadUrl(id, { force = false } = {}) {
 
 // ===== FILTERING / VISIBILITY =====
 function isProcessed(id, st) {
-  return !!(st.processed[id] || st.soft[id]);
+  const p = st.processed || {};
+  const soft = st.soft || {};
+  return !!(p[id] || soft[id]);
 }
+
 function passesFilter(it, st) {
-  const mark = st.processed[it.id]; // 'F', 'X', or undefined
-  const soft = !!st.soft[it.id];    // hovered processed
+  const p = st.processed || {};
+  const softMap = st.soft || {};
+  const mark = p[it.id];           // 'F' | 'X' | undefined
+  const soft = !!softMap[it.id];   // hovered
   switch (filterMode) {
     case "chosen":     return mark === "F";
     case "declined":   return mark === "X";
     case "unprocessed":return !mark && !soft;
-    default:           return true; // all
+    default:           return true;
   }
 }
-function shouldShowItem(it, st){
+
+function shouldShowItem(it, st) {
   if (!passesFilter(it, st)) return false;
   if (!hideProcessed) return true;
-  return !isProcessed(it.id, st); // hides hard/soft processed
+  return !isProcessed(it.id, st);
 }
 
 // ===== RENDER HELPERS =====
